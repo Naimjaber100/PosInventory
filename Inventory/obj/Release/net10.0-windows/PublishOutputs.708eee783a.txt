@@ -1,0 +1,17 @@
+C:\Projects\Inventory\Inventory\bin\Release\net10.0-windows\publish\Inventory.exe
+C:\Projects\Inventory\Inventory\bin\Release\net10.0-windows\publish\appsettings.json
+C:\Projects\Inventory\Inventory\bin\Release\net10.0-windows\publish\Inventory.dll
+C:\Projects\Inventory\Inventory\bin\Release\net10.0-windows\publish\Inventory.deps.json
+C:\Projects\Inventory\Inventory\bin\Release\net10.0-windows\publish\Inventory.runtimeconfig.json
+C:\Projects\Inventory\Inventory\bin\Release\net10.0-windows\publish\Inventory.pdb
+C:\Projects\Inventory\Inventory\bin\Release\net10.0-windows\publish\ClosedXML.dll
+C:\Projects\Inventory\Inventory\bin\Release\net10.0-windows\publish\ClosedXML.Parser.dll
+C:\Projects\Inventory\Inventory\bin\Release\net10.0-windows\publish\Dapper.dll
+C:\Projects\Inventory\Inventory\bin\Release\net10.0-windows\publish\DocumentFormat.OpenXml.dll
+C:\Projects\Inventory\Inventory\bin\Release\net10.0-windows\publish\DocumentFormat.OpenXml.Framework.dll
+C:\Projects\Inventory\Inventory\bin\Release\net10.0-windows\publish\ExcelNumberFormat.dll
+C:\Projects\Inventory\Inventory\bin\Release\net10.0-windows\publish\Microsoft.Extensions.DependencyInjection.Abstractions.dll
+C:\Projects\Inventory\Inventory\bin\Release\net10.0-windows\publish\Microsoft.Extensions.Logging.Abstractions.dll
+C:\Projects\Inventory\Inventory\bin\Release\net10.0-windows\publish\Npgsql.dll
+C:\Projects\Inventory\Inventory\bin\Release\net10.0-windows\publish\RBush.dll
+C:\Projects\Inventory\Inventory\bin\Release\net10.0-windows\publish\SixLabors.Fonts.dll

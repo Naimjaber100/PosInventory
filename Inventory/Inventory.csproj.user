@@ -1,0 +1,68 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <_LastSelectedProfileId>C:\Projects\Inventory\Inventory\Properties\PublishProfiles\FolderProfile.pubxml</_LastSelectedProfileId>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Update="AddItemForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="CashierForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="CategoryForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="ColorSwatchPicker.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Update="CompanyForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="CurrenciesForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="Form1.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="HeldSalesForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="Item.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="LoginForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="PackagingPickerForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="PaymentForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="PurchaseEditForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="PurchaseForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="QuickButtonsForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="QuickGroupEditForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="QuickItemPickerForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="SalesHistoryForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="UserEditForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="UsersForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+  </ItemGroup>
+</Project>
