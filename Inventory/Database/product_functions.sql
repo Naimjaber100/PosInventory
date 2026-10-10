@@ -152,6 +152,7 @@ DROP FUNCTION IF EXISTS public.fn_product_get_all();
 DROP FUNCTION IF EXISTS public.fn_product_get_all(integer, integer);
 DROP FUNCTION IF EXISTS public.fn_product_get_all(integer, integer, integer);
 DROP FUNCTION IF EXISTS public.fn_product_get_all(integer, integer, integer, text);
+DROP FUNCTION IF EXISTS public.fn_product_get_all(integer, integer, integer, text, text);
 
 -- One page of products ordered by name. Every row carries total_count (all matching
 -- products, not just this page) so the caller gets the page and the total in one call.
@@ -165,7 +166,8 @@ CREATE OR REPLACE FUNCTION public.fn_product_get_all(
     p_page        integer DEFAULT 1,
     p_page_size   integer DEFAULT 50,
     p_category_id integer DEFAULT NULL,
-    p_search      text    DEFAULT NULL)
+    p_search      text    DEFAULT NULL,
+    p_stock       text    DEFAULT NULL)   -- NULL = all, 'in' = above the reorder level, 'low' = 0 < stock <= reorder level, 'out' = 0 or less
 RETURNS TABLE (
     product_id integer, parent_id integer, name varchar, category_id integer, category_name varchar,
     product_type smallint, size varchar, color varchar, base_unit varchar, is_weighted boolean,
@@ -210,6 +212,11 @@ BEGIN
            OR NOT EXISTS (SELECT 1 FROM unnest(v_words) w WHERE p.name NOT ILIKE '%' || w || '%')
            OR EXISTS (SELECT 1 FROM product_packaging b
                       WHERE b.product_id = p.product_id AND b.barcode LIKE v_pattern || '%'))
+      -- Stock filter: only standard items hold stock (bundles / models count as "in stock")
+      AND (p_stock IS NULL
+           OR (p_stock = 'in'  AND (p.product_type <> 1 OR p.stock_qty > p.reorder_level))
+           OR (p_stock = 'low' AND p.product_type = 1 AND p.stock_qty > 0 AND p.stock_qty <= p.reorder_level)
+           OR (p_stock = 'out' AND p.product_type = 1 AND p.stock_qty <= 0))
     ORDER BY (v_search IS NOT NULL AND EXISTS (SELECT 1 FROM product_packaging b
                                               WHERE b.product_id = p.product_id AND b.barcode = v_search)) DESC,
              p.name, p.product_id          -- product_id keeps the order stable between pages
@@ -552,4 +559,17 @@ BEGIN
     END LOOP;
 
     RETURN v_count;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- Switches an item on or off (the Active toggle of the item list). Nothing else changes.
+-- ---------------------------------------------------------------------------
+DROP FUNCTION IF EXISTS public.fn_product_set_active(integer, boolean);
+CREATE OR REPLACE FUNCTION public.fn_product_set_active(p_product_id integer, p_is_active boolean)
+RETURNS void
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    UPDATE products SET is_active = p_is_active, updated_at = now() WHERE product_id = p_product_id;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Item % not found.', p_product_id; END IF;
 END $$;

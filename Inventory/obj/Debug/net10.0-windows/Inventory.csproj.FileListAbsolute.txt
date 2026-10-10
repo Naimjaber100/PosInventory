@@ -53,3 +53,7 @@ C:\Projects\Inventory\Inventory\obj\Debug\net10.0-windows\refint\Inventory.dll
 C:\Projects\Inventory\Inventory\obj\Debug\net10.0-windows\Inventory.pdb
 C:\Projects\Inventory\Inventory\obj\Debug\net10.0-windows\Inventory.genruntimeconfig.cache
 C:\Projects\Inventory\Inventory\obj\Debug\net10.0-windows\ref\Inventory.dll
+C:\Projects\Inventory\Inventory\obj\Debug\net10.0-windows\Inventory.sourcelink.json
+C:\Projects\Inventory\Inventory\obj\Debug\net10.0-windows\Inventory.AiPurchaseImportForm.resources
+C:\Projects\Inventory\Inventory\bin\Debug\net10.0-windows\appsettings.local.json
+C:\Users\naim.jaber\AppData\Local\Temp\claude\inv_build\appsettings.local.json

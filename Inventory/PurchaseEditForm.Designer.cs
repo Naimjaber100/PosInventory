@@ -1,4 +1,4 @@
-namespace Inventory
+﻿namespace Inventory
 {
     partial class PurchaseEditForm
     {
@@ -54,6 +54,8 @@ namespace Inventory
             scanBox = new TextBox();
             addLineButton = new Button();
             removeLineButton = new Button();
+            aiButton = new Button();
+            voiceButton = new Button();
             hintLabel = new Label();
             buttonsPanel = new FlowLayoutPanel();
             cancelButton = new Button();
@@ -311,6 +313,8 @@ namespace Inventory
             scanPanel.Controls.Add(scanBox);
             scanPanel.Controls.Add(addLineButton);
             scanPanel.Controls.Add(removeLineButton);
+            scanPanel.Controls.Add(aiButton);
+            scanPanel.Controls.Add(voiceButton);
             scanPanel.Controls.Add(hintLabel);
             scanPanel.Dock = DockStyle.Top;
             scanPanel.Location = new Point(10, 32);
@@ -355,12 +359,42 @@ namespace Inventory
             removeLineButton.TabIndex = 2;
             removeLineButton.Text = "Remove line";
             removeLineButton.Click += removeLineButton_Click;
+            //
+            // aiButton
+            //
+            aiButton.BackColor = Color.FromArgb(37, 99, 235);
+            aiButton.FlatAppearance.BorderSize = 0;
+            aiButton.FlatStyle = FlatStyle.Flat;
+            aiButton.Font = new Font("Segoe UI Semibold", 9.5F, FontStyle.Bold);
+            aiButton.ForeColor = Color.White;
+            aiButton.Location = new Point(712, 6);
+            aiButton.Name = "aiButton";
+            aiButton.Size = new Size(210, 36);
+            aiButton.TabIndex = 4;
+            aiButton.Text = "📷 Read invoice (AI)";
+            aiButton.UseVisualStyleBackColor = false;
+            aiButton.Click += aiButton_Click;
+            //
+            // voiceButton
+            //
+            voiceButton.BackColor = Color.FromArgb(124, 58, 237);
+            voiceButton.FlatAppearance.BorderSize = 0;
+            voiceButton.FlatStyle = FlatStyle.Flat;
+            voiceButton.Font = new Font("Segoe UI Semibold", 9.5F, FontStyle.Bold);
+            voiceButton.ForeColor = Color.White;
+            voiceButton.Location = new Point(930, 6);
+            voiceButton.Name = "voiceButton";
+            voiceButton.Size = new Size(160, 36);
+            voiceButton.TabIndex = 5;
+            voiceButton.Text = "🎤 Voice note (AI)";
+            voiceButton.UseVisualStyleBackColor = false;
+            voiceButton.Click += voiceButton_Click;
             // 
             // hintLabel
             // 
             hintLabel.AutoSize = true;
             hintLabel.ForeColor = Color.DimGray;
-            hintLabel.Location = new Point(716, 14);
+            hintLabel.Location = new Point(1100, 14);
             hintLabel.Name = "hintLabel";
             hintLabel.Size = new Size(481, 21);
             hintLabel.TabIndex = 3;
@@ -467,6 +501,8 @@ namespace Inventory
         private TextBox scanBox;
         private Button addLineButton;
         private Button removeLineButton;
+        private Button aiButton;
+        private Button voiceButton;
         private Label hintLabel;
         private FlowLayoutPanel buttonsPanel;
         private Button cancelButton;

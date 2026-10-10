@@ -10,16 +10,23 @@ namespace Inventory.Repositories
 
         public const int NoCategory = 0;
 
+        // Stock filters of GetPageAsync (fn_product_get_all p_stock)
+        public const string StockIn = "in";
+        public const string StockLow = "low";
+        public const string StockOut = "out";
+
         /// <summary>
         /// One page of products. categoryId: null = all items, NoCategory (0) = items without a category,
         /// otherwise that category and all of its sub-categories.
         /// search: name words or barcode (null/blank = no search).
+        /// stock: null = all, StockIn / StockLow / StockOut.
         /// </summary>
-        public async Task<PagedResult<ProductModel>> GetPageAsync(int page, int pageSize, int? categoryId = null, string? search = null)
+        public async Task<PagedResult<ProductModel>> GetPageAsync(int page, int pageSize, int? categoryId = null, string? search = null, string? stock = null)
         {
             var parameters = new DynamicParameters();
             parameters.Add("p_category_id", categoryId, DbType.Int32);
             parameters.Add("p_search", string.IsNullOrWhiteSpace(search) ? null : search.Trim(), DbType.String);
+            parameters.Add("p_stock", stock, DbType.String);
 
             return await GetPagedAsync<ProductModel>(Procedures.GetAllProducts, page, pageSize, parameters);
         }
@@ -65,6 +72,35 @@ namespace Inventory.Repositories
             parameters.Add("p_product_id", product.ProductId);
 
             await ExecuteAsync(Procedures.UpdateProduct, parameters);
+        }
+
+        /// <summary>The item's scale code (PLU); null when it is not a scale product.</summary>
+        public async Task<string?> GetScaleCodeAsync(int productId)
+        {
+            var parameters = new DynamicParameters();
+            parameters.Add("p_product_id", productId);
+
+            return await GetSingleAsync<string?>(Procedures.GetProductScaleCode, parameters);
+        }
+
+        /// <summary>Makes the item a scale product with this code, or not one (null / blank). Fails when another item has the code.</summary>
+        public async Task SetScaleCodeAsync(int productId, string? scaleCode)
+        {
+            var parameters = new DynamicParameters();
+            parameters.Add("p_product_id", productId);
+            parameters.Add("p_scale_code", scaleCode, DbType.String);
+
+            await ExecuteAsync(Procedures.SetProductScaleCode, parameters);
+        }
+
+        /// <summary>Switches an item on or off; nothing else changes.</summary>
+        public async Task SetActiveAsync(int productId, bool isActive)
+        {
+            var parameters = new DynamicParameters();
+            parameters.Add("p_product_id", productId);
+            parameters.Add("p_is_active", isActive);
+
+            await ExecuteAsync(Procedures.SetProductActive, parameters);
         }
 
         /// <summary>Returns true when deleted, false when the item has history and was deactivated instead.</summary>

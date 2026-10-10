@@ -465,6 +465,13 @@ namespace Inventory
             var text = scanBox.Text.Trim();
             if (text.Length == 0) return;
 
+            // A scale label: the item and its weight or price are in the barcode (appsettings.json "ScaleBarcode")
+            if (ScaleBarcode.TryParse(text, out var label))
+            {
+                await AddScaleLabelAsync(label);
+                return;
+            }
+
             // "3*barcode" or "3*" + name: add 3 pieces
             var quantity = 1m;
             var star = text.IndexOf('*');
@@ -482,7 +489,9 @@ namespace Inventory
                 if (matches.Count == 0)
                 {
                     System.Media.SystemSounds.Hand.Play();
-                    ShowStatus($"Not found: \"{text}\"", Color.Salmon);
+                    ShowStatus(ScaleBarcode.IsBadScaleLabel(text)
+                        ? $"\"{text}\" looks like a scale label, but its last digit (check digit) is wrong. Scan the label again."
+                        : $"Not found: \"{text}\"", Color.Salmon);
                     scanBox.SelectAll();
                     return;
                 }
@@ -499,6 +508,55 @@ namespace Inventory
 
                 if (item != null) AddItem(item, quantity);
                 scanBox.Clear();
+                FocusScan();
+            }
+            catch (Exception ex)
+            {
+                ShowStatus("Search failed: " + ex.Message, Color.Salmon);
+            }
+        }
+
+        // Weight label: the weight is the quantity at the item's price.
+        // Price label: a weighed item gets the weight that this price buys (price / price per kg);
+        //              an item sold by piece is added once at the price on the label.
+        private async Task AddScaleLabelAsync(ScaleLabel label)
+        {
+            try
+            {
+                var item = await _saleRepository.FindScaleItemAsync(label.ItemCode);
+                if (item == null)
+                {
+                    System.Media.SystemSounds.Hand.Play();
+                    ShowStatus($"Scale label: no scale product has code {label.ItemCode}. Set it on the item (Scale product).", Color.Salmon);
+                    scanBox.SelectAll();
+                    return;
+                }
+
+                bool added;
+                if (label.Kind == ScaleValueKind.Weight)
+                {
+                    if (label.Value <= 0) { ShowStatus("The weight on the label is 0.", Color.Khaki); scanBox.SelectAll(); return; }
+                    if (!item.IsWeighted)
+                    {
+                        ShowStatus($"{item.ItemName} is not sold by weight: tick \"Sold by weight\" on the item.", Color.Khaki);
+                        scanBox.SelectAll();
+                        return;
+                    }
+                    added = AddItem(item, label.Value);
+                }
+                else if (item.IsWeighted && item.SalePrice > 0)
+                {
+                    var weight = Math.Round(label.Value / item.SalePrice, 3);
+                    if (weight <= 0) { ShowStatus("The price on the label is too small.", Color.Khaki); scanBox.SelectAll(); return; }
+                    added = AddItem(item, weight);
+                }
+                else
+                {
+                    if (label.Value <= 0) { ShowStatus("The price on the label is 0.", Color.Khaki); scanBox.SelectAll(); return; }
+                    added = AddItem(item.WithPrice(Math.Round(label.Value, 2)), 1);
+                }
+
+                if (added) scanBox.Clear();   // the big panel shows "weight x price = total"; stock warnings stay
                 FocusScan();
             }
             catch (Exception ex)

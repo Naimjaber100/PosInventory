@@ -46,6 +46,20 @@ namespace Inventory.Repositories
         }
 
         /// <summary>
+        /// The packagings that best match a line read from an invoice photo (fuzzy name, packaging, barcode), best first.
+        /// </summary>
+        public async Task<List<PackagingLookupModel>> MatchPackagingAsync(string text, string? packaging, string? barcode, int limit = 5)
+        {
+            var parameters = new DynamicParameters();
+            parameters.Add("p_text", text);
+            parameters.Add("p_packaging", packaging, DbType.String);
+            parameters.Add("p_barcode", barcode, DbType.String);
+            parameters.Add("p_limit", limit);
+
+            return (await GetListAsync<PackagingLookupModel>(Procedures.MatchPurchasePackaging, parameters)).ToList();
+        }
+
+        /// <summary>
         /// Saves a new purchase (header.PurchaseId = 0) or updates a draft, with all its lines.
         /// post = true also posts it (stock and average cost updated, number assigned, no more changes).
         /// Returns the purchase_id.

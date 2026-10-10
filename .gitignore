@@ -1,1 +1,4 @@
 .vs/
+
+# Secrets: the OpenAI key (never commit it)
+appsettings.local.json

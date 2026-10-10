@@ -16,11 +16,23 @@ namespace Inventory
         private bool _loading = true;
         private Label _salesValue = null!, _profitValue = null!, _countValue = null!, _returnsValue = null!;
 
+        private int? _openForUserId;        // set when opened from a report: the cashier (null = all users)
+        private bool _openedFromReport;
+
         public SalesHistoryForm()
         {
             InitializeComponent();
             BuildCards();
             fromPicker.Value = toPicker.Value = DateTime.Today;
+        }
+
+        /// <summary>Opens on a period and a cashier (userId null = all users), e.g. a day of the daily sales report.</summary>
+        public SalesHistoryForm(DateTime from, DateTime to, int? userId) : this()
+        {
+            fromPicker.Value = from.Date;
+            toPicker.Value = to.Date;
+            _openForUserId = userId;
+            _openedFromReport = true;
         }
 
         // The four totals at the top
@@ -59,7 +71,7 @@ namespace Inventory
                     userCombo.DisplayMember = "Name";
                     userCombo.ValueMember = "Id";
                     userCombo.DataSource = choices;
-                    userCombo.SelectedValue = AppConfig.CurrentUserId;
+                    userCombo.SelectedValue = _openedFromReport ? _openForUserId ?? AllUsers : AppConfig.CurrentUserId;
                 }
                 catch
                 {

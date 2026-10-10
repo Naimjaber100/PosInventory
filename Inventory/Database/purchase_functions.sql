@@ -278,3 +278,55 @@ BEGIN
 
     RETURN v_id;
 END $$;
+
+-- ---------------------------------------------------------------------------
+-- AI invoice reading: the items that best match one line read from a supplier's invoice photo.
+-- p_text = the item as written ("pepsi bix", "Unica BP"), p_packaging = the packaging read (box, pack, bottle)
+-- or NULL, p_barcode = a barcode printed on the line or NULL.
+-- Fuzzy text match (pg_trgm), so spelling mistakes still match; an exact barcode always wins (score 1).
+-- score 0..1: about 0.5 and more is a good match. Only packagings that can be purchased.
+-- ---------------------------------------------------------------------------
+DROP FUNCTION IF EXISTS public.fn_purchase_match_packaging(text, text, text, integer);
+CREATE OR REPLACE FUNCTION public.fn_purchase_match_packaging(
+    p_text text, p_packaging text DEFAULT NULL, p_barcode text DEFAULT NULL, p_limit integer DEFAULT 5)
+RETURNS TABLE (
+    packaging_id integer, product_id integer, item_name text, packaging_name varchar,
+    barcode varchar, factor numeric, base_unit varchar, is_weighted boolean, last_cost numeric, score numeric)
+LANGUAGE sql STABLE
+AS $$
+    WITH input AS (
+        SELECT lower(coalesce(nullif(trim(p_text), ''), '?')) AS t,
+               lower(nullif(trim(p_packaging), '')) AS pk,
+               nullif(trim(p_barcode), '') AS bc
+    ),
+    candidates AS (
+        SELECT pk.packaging_id, p.product_id,
+               fn_item_description(p.name::text, p.size::text, p.color::text, NULL) AS item_name,
+               pk.name AS packaging_name, pk.barcode, pk.factor, p.base_unit, p.is_weighted,
+               round(p.avg_cost * pk.factor, 2) AS last_cost,
+               -- name similarity counts for 85%, the packaging read on the invoice (box / pack / bottle...) for 15%,
+               -- so the right packaging of the right item scores highest
+               CASE WHEN i.bc IS NOT NULL AND pk.barcode = i.bc THEN 1.0
+                    ELSE least(0.99,
+                         0.85 * greatest(similarity(i.t, lower(p.name)),
+                                         word_similarity(i.t, lower(p.name || ' ' || coalesce(p.size, '') || ' ' || pk.name)),
+                                         similarity(i.t, lower(p.name || ' ' || pk.name)))
+                         + CASE WHEN i.pk IS NULL THEN (CASE WHEN pk.is_default THEN 0.10 ELSE 0.05 END)
+                                WHEN lower(pk.name) = i.pk OR similarity(lower(pk.name), i.pk) > 0.4 THEN 0.15
+                                -- "pack", "carton", "case", "bp"... on the invoice = a packaging of several units
+                                WHEN i.pk IN ('pack', 'packet', 'carton', 'case', 'box', 'bx', 'bp', 'dozen', 'tray', 'bundle', 'crate')
+                                     AND pk.factor > 1 THEN 0.12
+                                ELSE 0 END)
+               END::numeric(5,3) AS score
+        FROM product_packaging pk
+        JOIN products p ON p.product_id = pk.product_id
+        CROSS JOIN input i
+        WHERE pk.is_active AND pk.can_purchase AND p.is_active AND p.product_type = 1
+    )
+    SELECT c.packaging_id, c.product_id, c.item_name, c.packaging_name, c.barcode, c.factor, c.base_unit,
+           c.is_weighted, c.last_cost, greatest(c.score, 0)
+    FROM candidates c
+    WHERE c.score > 0.15
+    ORDER BY c.score DESC, c.item_name, c.factor
+    LIMIT greatest(coalesce(p_limit, 5), 1);
+$$;

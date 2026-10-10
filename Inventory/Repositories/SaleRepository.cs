@@ -19,6 +19,15 @@ namespace Inventory.Repositories
             return await GetListAsync<PosItemModel>(Procedures.PosFindItem, parameters);
         }
 
+        /// <summary>The item of a scale label by its scale code (null when no scale product has it).</summary>
+        public async Task<PosItemModel?> FindScaleItemAsync(string scaleCode)
+        {
+            var parameters = new DynamicParameters();
+            parameters.Add("p_scale_code", scaleCode);
+
+            return await GetSingleAsync<PosItemModel>(Procedures.PosFindScaleItem, parameters);
+        }
+
         /// <summary>A value from the settings table (e.g. "store_name"), or defaultValue.</summary>
         public async Task<string?> GetSettingAsync(string key, string? defaultValue = null)
         {

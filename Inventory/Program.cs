@@ -22,6 +22,21 @@ namespace Inventory
                     {
                         AppConfig.ConnectionString = defaultConn.GetString();
                     }
+                    AppConfig.Scale = ScaleBarcodeSettings.Read(doc.RootElement);
+                    AppConfig.OpenAi = Ai.OpenAiSettings.Read(doc.RootElement);
+                }
+
+                // Secrets (the OpenAI key) go in appsettings.local.json: git ignores it, so it is never committed
+                var localPath = System.IO.Path.Combine(AppContext.BaseDirectory, "appsettings.local.json");
+                if (System.IO.File.Exists(localPath))
+                {
+                    using var local = System.Text.Json.JsonDocument.Parse(System.IO.File.ReadAllText(localPath));
+                    if (local.RootElement.TryGetProperty("OpenAI", out _))
+                    {
+                        var fromLocal = Ai.OpenAiSettings.Read(local.RootElement);
+                        if (!string.IsNullOrWhiteSpace(fromLocal.ApiKey)) AppConfig.OpenAi.ApiKey = fromLocal.ApiKey;
+                        if (local.RootElement.GetProperty("OpenAI").TryGetProperty("Model", out _)) AppConfig.OpenAi.Model = fromLocal.Model;
+                    }
                 }
             }
             catch

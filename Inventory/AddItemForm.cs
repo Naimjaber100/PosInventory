@@ -43,9 +43,11 @@ namespace Inventory
             if (IsEdit)
             {
                 Text = "Edit item";
+                titleLabel.Text = "Edit Product";
+                breadcrumbLabel.Text = "Products  >  Edit Product";
+                subtitleLabel.Text = "Change this product's details, units and prices";
                 // Stock and cost change only through stock operations (purchases, adjustments, sales)
                 costInput.Enabled = false;
-                stockLabel.Text = "Stock";
                 stockInput.Minimum = -1000000000; // stock can go negative after sales
             }
             else
@@ -80,6 +82,9 @@ namespace Inventory
                         return;
                     }
                     FillFields(product);
+                    var scaleCode = await _productRepository.GetScaleCodeAsync(product.ProductId);
+                    scaleCheck.Checked = !string.IsNullOrEmpty(scaleCode);
+                    scaleCodeText.Text = scaleCode;
 
                     _packagings.Clear();
                     foreach (var p in await _productRepository.GetPackagingsAsync(product.ProductId))
@@ -91,6 +96,8 @@ namespace Inventory
                 MessageBox.Show(this, "Could not load data:\n" + ex.Message, Text,
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
+            // The type list is filled before the form is shown; apply its rule (stock only on standard items) now
+            typeCombo_SelectedIndexChanged(typeCombo, EventArgs.Empty);
         }
 
         private void FillFields(ProductModel product)
@@ -106,6 +113,18 @@ namespace Inventory
             reorderInput.Value = product.ReorderLevel;
             weightedCheck.Checked = product.IsWeighted;
             activeCheck.Checked = product.IsActive;
+        }
+
+        // Scale product: the code box is used only when it is ticked; a weighed item is usually "Sold by weight"
+        private void scaleCheck_CheckedChanged(object? sender, EventArgs e)
+        {
+            scaleCodeText.Enabled = scaleCheck.Checked;
+            if (scaleCheck.Checked)
+            {
+                scaleCodeText.Focus();
+                scaleHintLabel.Text = $"Up to {ScaleBarcode.Settings.ItemCodeLength} digits, the item number set in the scale. "
+                                      + "Tick \"Sold by weight\" for weighed items (kg).";
+            }
         }
 
         private void typeCombo_SelectedIndexChanged(object? sender, EventArgs e)
@@ -203,6 +222,30 @@ namespace Inventory
             UpdateFactorHeader();
         }
 
+        // A small "BASE" tag after the name of the base unit (contains 1 and named like the base unit)
+        private void packagingGrid_CellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.RowIndex >= _packagings.Count || e.Graphics == null
+                || packagingGrid.Columns[e.ColumnIndex].DataPropertyName != nameof(PackagingModel.Name)
+                || packagingGrid.IsCurrentCellInEditMode && packagingGrid.CurrentCell?.RowIndex == e.RowIndex && packagingGrid.CurrentCell.ColumnIndex == e.ColumnIndex)
+                return;
+            var packaging = _packagings[e.RowIndex];
+            if (packaging.Factor != 1 || !string.Equals(packaging.Name, _lastUnit, StringComparison.OrdinalIgnoreCase)) return;
+
+            e.Paint(e.ClipBounds, DataGridViewPaintParts.All);
+            var font = e.CellStyle?.Font ?? packagingGrid.Font;
+            var textWidth = TextRenderer.MeasureText(e.Graphics, packaging.Name, font).Width;
+            using var tagFont = new Font("Segoe UI Semibold", 7F, FontStyle.Bold);
+            var tag = new Rectangle(e.CellBounds.X + textWidth + 4, e.CellBounds.Y + (e.CellBounds.Height - 16) / 2, 36, 16);
+            if (tag.Right < e.CellBounds.Right)
+            {
+                using var back = new SolidBrush(Color.FromArgb(29, 78, 160));
+                e.Graphics.FillRectangle(back, tag);
+                TextRenderer.DrawText(e.Graphics, "BASE", tagFont, tag, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+            }
+            e.Handled = true;
+        }
+
         private void UpdateFactorHeader()
         {
             if (packagingGrid.Columns[nameof(PackagingModel.Factor)] is { } factor)
@@ -264,6 +307,26 @@ namespace Inventory
                 return;
             }
 
+            // Scale product: the code must fit in the label (ScaleBarcode.ItemCodeLength in appsettings.json)
+            string? scaleCode = null;
+            if (scaleCheck.Checked)
+            {
+                var code = scaleCodeText.Text.Trim();
+                var length = ScaleBarcode.Settings.ItemCodeLength;
+                string? scaleProblem = code.Length == 0 ? "Type the scale code (PLU) set for this item in the scale."
+                    : !code.All(char.IsAsciiDigit) ? "The scale code can only have digits."
+                    : code.Length > length ? $"The scale code can have at most {length} digits (ScaleBarcode.ItemCodeLength in appsettings.json)."
+                    : typeCombo.SelectedValue is short t && t != StandardType ? "Only a standard item can be a scale product."
+                    : null;
+                if (scaleProblem != null)
+                {
+                    MessageBox.Show(this, scaleProblem, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    scaleCodeText.Focus();
+                    return;
+                }
+                scaleCode = ScaleBarcode.NormalizeCode(code);
+            }
+
             var categoryId = categoryCombo.SelectedValue is int id && id > 0 ? id : (int?)null;
 
             var product = new ProductModel
@@ -285,10 +348,27 @@ namespace Inventory
             {
                 saveButton.Enabled = false;
                 UseWaitCursor = true;
+                int productId;
                 if (IsEdit)
+                {
                     await _productRepository.UpdateAsync(product, _packagings);
+                    productId = _productId!.Value;
+                }
                 else
-                    await _productRepository.AddAsync(product, stockInput.Value, AppConfig.CurrentUserId, _packagings);
+                {
+                    productId = await _productRepository.AddAsync(product, stockInput.Value, AppConfig.CurrentUserId, _packagings);
+                }
+
+                // The item is saved; now its scale code (if this fails the item stays saved: fix the code with Edit)
+                try
+                {
+                    await _productRepository.SetScaleCodeAsync(productId, scaleCode);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(this, "The item was saved, but not its scale code:\n" + (ex is Npgsql.PostgresException pg ? pg.MessageText : ex.Message)
+                                          + "\n\nOpen the item again (Edit) to set another code.", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
                 DialogResult = DialogResult.OK;
                 Close();
             }

@@ -39,6 +39,8 @@
             quickButtonsToolStripMenuItem = new ToolStripMenuItem();
             purchaseToolStripMenuItem = new ToolStripMenuItem();
             invoiceToolStripMenuItem = new ToolStripMenuItem();
+            reportsToolStripMenuItem = new ToolStripMenuItem();
+            dailySalesReportToolStripMenuItem = new ToolStripMenuItem();
             cashierToolStripMenuItem = new ToolStripMenuItem();
             menuStrip1.SuspendLayout();
             SuspendLayout();
@@ -46,7 +48,7 @@
             // menuStrip1
             // 
             menuStrip1.ImageScalingSize = new Size(20, 20);
-            menuStrip1.Items.AddRange(new ToolStripItem[] { settingsToolStripMenuItem, itemToolStripMenuItem, purchaseToolStripMenuItem, invoiceToolStripMenuItem, cashierToolStripMenuItem });
+            menuStrip1.Items.AddRange(new ToolStripItem[] { settingsToolStripMenuItem, itemToolStripMenuItem, purchaseToolStripMenuItem, invoiceToolStripMenuItem, reportsToolStripMenuItem, cashierToolStripMenuItem });
             menuStrip1.Location = new Point(0, 0);
             menuStrip1.Name = "menuStrip1";
             menuStrip1.Size = new Size(1684, 28);
@@ -120,6 +122,20 @@
             invoiceToolStripMenuItem.Name = "invoiceToolStripMenuItem";
             invoiceToolStripMenuItem.Size = new Size(70, 24);
             invoiceToolStripMenuItem.Text = "Invoice";
+            //
+            // reportsToolStripMenuItem
+            //
+            reportsToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { dailySalesReportToolStripMenuItem });
+            reportsToolStripMenuItem.Name = "reportsToolStripMenuItem";
+            reportsToolStripMenuItem.Size = new Size(74, 24);
+            reportsToolStripMenuItem.Text = "Reports";
+            //
+            // dailySalesReportToolStripMenuItem
+            //
+            dailySalesReportToolStripMenuItem.Name = "dailySalesReportToolStripMenuItem";
+            dailySalesReportToolStripMenuItem.Size = new Size(240, 26);
+            dailySalesReportToolStripMenuItem.Text = "Daily sales summary";
+            dailySalesReportToolStripMenuItem.Click += dailySalesReportToolStripMenuItem_Click;
             // 
             // cashierToolStripMenuItem
             // 
@@ -157,6 +173,8 @@
         private ToolStripMenuItem quickButtonsToolStripMenuItem;
         private ToolStripMenuItem purchaseToolStripMenuItem;
         private ToolStripMenuItem invoiceToolStripMenuItem;
+        private ToolStripMenuItem reportsToolStripMenuItem;
+        private ToolStripMenuItem dailySalesReportToolStripMenuItem;
         private ToolStripMenuItem cashierToolStripMenuItem;
     }
 }

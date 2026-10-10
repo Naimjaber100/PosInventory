@@ -7,6 +7,9 @@
     <Compile Update="AddItemForm.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Update="AiPurchaseImportForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Update="CashierForm.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -53,6 +56,9 @@
       <SubType>Form</SubType>
     </Compile>
     <Compile Update="QuickItemPickerForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="Reports\ReportForm.cs">
       <SubType>Form</SubType>
     </Compile>
     <Compile Update="SalesHistoryForm.cs">

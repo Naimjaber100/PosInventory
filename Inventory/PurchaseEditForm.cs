@@ -238,6 +238,49 @@ namespace Inventory
             linesGrid.FirstDisplayedScrollingRowIndex = index;
         }
 
+        private void aiButton_Click(object? sender, EventArgs e) => AddFromAi(voice: false);
+
+        private void voiceButton_Click(object? sender, EventArgs e) => AddFromAi(voice: true);
+
+        // Read invoice (AI) / Voice note (AI): the checked lines are added; the same packaging adds to its line.
+        // The supplier's invoice number, date and discount are filled when they are still empty.
+        private void AddFromAi(bool voice)
+        {
+            if (IsReadOnly) return;
+            using var form = new AiPurchaseImportForm(voice);
+            if (form.ShowDialog(this) != DialogResult.OK) return;
+
+            foreach (var (item, quantity, unitCost) in form.Lines)
+            {
+                var existing = _lines.FirstOrDefault(l => l.PackagingId == item.PackagingId);
+                if (existing != null)
+                {
+                    existing.Quantity += quantity;
+                    if (existing.UnitCost == 0) existing.UnitCost = unitCost;
+                    continue;
+                }
+                _lines.Add(new PurchaseEditLine
+                {
+                    PackagingId = item.PackagingId,
+                    ProductId = item.ProductId,
+                    ItemName = item.ItemName,
+                    PackagingName = item.PackagingName,
+                    Barcode = item.Barcode,
+                    Factor = item.Factor,
+                    BaseUnit = item.BaseUnit,
+                    IsWeighted = item.IsWeighted,
+                    Quantity = quantity,
+                    UnitCost = unitCost,
+                });
+            }
+
+            if (string.IsNullOrWhiteSpace(supplierInvoiceText.Text) && form.InvoiceNumber != null) supplierInvoiceText.Text = form.InvoiceNumber;
+            if (form.InvoiceDate is { } date && date >= dateInput.MinDate && date <= dateInput.MaxDate) dateInput.Value = date;
+            if (discountInput.Value == 0 && form.Discount is { } discount) discountInput.Value = Math.Min(discount, discountInput.Maximum);
+            if (_lines.Count > 0) SelectLine(_lines[^1]);
+            MarkDirty();
+        }
+
         private void removeLineButton_Click(object? sender, EventArgs e)
         {
             if (IsReadOnly) return;

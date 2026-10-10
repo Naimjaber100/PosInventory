@@ -69,6 +69,16 @@ namespace Inventory
             purchaseForm.Show(this);
         }
 
+        // Reports > Daily sales summary
+        private void dailySalesReportToolStripMenuItem_Click(object sender, EventArgs e) => OpenReport(new Reports.DailySalesReport());
+
+        // Each report opens in the shared report screen (several reports can be open at once)
+        private void OpenReport(Reports.ReportDefinition report)
+        {
+            var form = new Reports.ReportForm(report);
+            form.Show(this);
+        }
+
         // Settings > Currencies & exchange rates: the primary currency, the others and their rates
         private void currenciesToolStripMenuItem_Click(object sender, EventArgs e)
         {

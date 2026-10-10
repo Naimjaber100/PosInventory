@@ -10,6 +10,9 @@ namespace Inventory.Repositories
         public const string GetCurrencyRates = "fn_currency_rates";
         public const string SetPrimaryCurrency = "fn_currency_set_primary";
 
+        // Reports (Database/report_functions.sql)
+        public const string ReportDailySales = "fn_report_daily_sales";
+
         // Company, one record (Database/company_functions.sql)
         public const string GetCompany = "fn_company_get";
         public const string SaveCompany = "fn_company_save";
@@ -32,6 +35,10 @@ namespace Inventory.Repositories
         public const string AddProduct = "fn_product_add";
         public const string UpdateProduct = "fn_product_update";
         public const string DeleteProduct = "fn_product_delete";
+        public const string SetProductActive = "fn_product_set_active";
+        public const string GetProductScaleCode = "fn_product_get_scale_code";   // Database/scale_functions.sql
+        public const string SetProductScaleCode = "fn_product_set_scale_code";
+        public const string PosFindScaleItem = "fn_pos_find_scale_item";
         public const string ImportProducts = "fn_product_import";
         public const string GetProductPackagings = "fn_product_get_packagings";
 
@@ -41,6 +48,7 @@ namespace Inventory.Repositories
         public const string GetPurchaseById = "fn_purchase_get_by_id";
         public const string FindPurchasePackaging = "fn_purchase_find_packaging";
         public const string SavePurchase = "fn_purchase_save";
+        public const string MatchPurchasePackaging = "fn_purchase_match_packaging";
 
         // Cashier / sales (Database/pos_functions.sql; fn_save_sale, fn_hold_sale, fn_current_rate were already in the database)
         public const string PosFindItem = "fn_pos_find_item";
