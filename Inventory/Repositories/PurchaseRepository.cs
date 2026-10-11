@@ -76,6 +76,8 @@ namespace Inventory.Repositories
             parameters.Add("p_lines", new JsonbParameter(lines.Select(l => new { l.PackagingId, l.Quantity, l.UnitCost })));
             parameters.Add("p_post", post);
             parameters.Add("p_user_id", userId);
+            parameters.Add("p_currency", header.Currency, DbType.String);
+            parameters.Add("p_currency_rate", header.CurrencyRate, DbType.Decimal);
 
             return await GetSingleAsync<int>(Procedures.SavePurchase, parameters);
         }

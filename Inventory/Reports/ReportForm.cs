@@ -96,17 +96,30 @@ namespace Inventory.Reports
             }
             foreach (var card in cards)
             {
-                var panel = new Panel { Width = 238, Height = 92, Margin = new Padding(0, 0, 10, 0), BackColor = Color.White };
+                var panel = new Panel { Width = 238, Height = 92, Margin = new Padding(0, 0, 10, 0), BackColor = Color.White, Tag = "card" };
                 var color = card.Color;
                 panel.Paint += (_, e) => { using var bar = new SolidBrush(color); e.Graphics.FillRectangle(bar, 0, 0, 5, panel.Height); };
                 panel.Controls.Add(new Label { Text = card.Caption, Location = new Point(16, 8), AutoSize = true, ForeColor = Color.DimGray, Font = new Font("Segoe UI Semibold", 8.5F, FontStyle.Bold) });
-                panel.Controls.Add(new Label { Text = card.Value, Location = new Point(13, 28), Size = new Size(222, 36), ForeColor = card.Color, Font = new Font("Segoe UI", 14.5F, FontStyle.Bold), AutoEllipsis = true });
+                panel.Controls.Add(new Label { Text = card.Value, Location = new Point(13, 28), Size = new Size(222, 36), ForeColor = card.Color, Font = new Font("Segoe UI", 14.5F, FontStyle.Bold), AutoEllipsis = true, Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right });
                 if (card.Note != null)
-                    panel.Controls.Add(new Label { Text = card.Note, Location = new Point(16, 66), Size = new Size(218, 20), ForeColor = Color.DimGray, Font = new Font("Segoe UI", 8.5F), AutoEllipsis = true });
+                    panel.Controls.Add(new Label { Text = card.Note, Location = new Point(16, 66), Size = new Size(218, 20), ForeColor = Color.DimGray, Font = new Font("Segoe UI", 8.5F), AutoEllipsis = true, Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right });
                 cardsPanel.Controls.Add(panel);
             }
+            FitCards();
             cardsPanel.ResumeLayout();
         }
+
+        // Cards share the width of the window (238 px at most), so 5, 6 or more cards always fit
+        private void FitCards()
+        {
+            var cards = cardsPanel.Controls.Cast<Control>().Where(c => Equals(c.Tag, "card")).ToList();
+            if (cards.Count == 0) return;
+            var room = cardsPanel.ClientSize.Width - cardsPanel.Padding.Horizontal - cards.Count * 10;
+            var width = Math.Clamp(room / cards.Count, 150, 238);
+            foreach (var card in cards) card.Width = width;
+        }
+
+        private void cardsPanel_Resize(object? sender, EventArgs e) => FitCards();
 
         #region Period and filters
 

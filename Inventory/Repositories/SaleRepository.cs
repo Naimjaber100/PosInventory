@@ -28,6 +28,15 @@ namespace Inventory.Repositories
             return await GetSingleAsync<PosItemModel>(Procedures.PosFindScaleItem, parameters);
         }
 
+        /// <summary>Everything the printed receipt of a sale or return needs (one call), or null.</summary>
+        public async Task<Printing.Receipt?> GetReceiptAsync(int saleId)
+        {
+            var parameters = new DynamicParameters();
+            parameters.Add("p_sale_id", saleId);
+
+            return Printing.Receipt.FromJson(await GetSingleAsync<string?>(Procedures.SaleReceipt, parameters));
+        }
+
         /// <summary>A value from the settings table (e.g. "store_name"), or defaultValue.</summary>
         public async Task<string?> GetSettingAsync(string key, string? defaultValue = null)
         {

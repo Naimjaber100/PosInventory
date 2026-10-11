@@ -355,7 +355,7 @@
             costStyle.Format = "#,0.##";
             costColumn.DefaultCellStyle = costStyle;
             costColumn.FillWeight = 55F;
-            costColumn.HeaderText = "Unit cost (primary)";
+            costColumn.HeaderText = "Unit cost";
             costColumn.Name = "costColumn";
             costColumn.ReadOnly = true;
             //

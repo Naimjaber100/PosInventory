@@ -62,6 +62,23 @@ namespace Inventory
             itemForm.Show(this);
         }
 
+        // Contacts > Clients / Suppliers: two separate lists (customers and suppliers tables), one window each
+        private void clientsToolStripMenuItem_Click(object sender, EventArgs e) => ShowSingle<CustomersForm>();
+
+        private void suppliersToolStripMenuItem_Click(object sender, EventArgs e) => ShowSingle<SuppliersForm>();
+
+        // Brings the window to the front if it is already open, otherwise opens it (it can stay open next to purchases)
+        private void ShowSingle<T>() where T : Form, new()
+        {
+            if (Application.OpenForms.OfType<T>().FirstOrDefault() is { } open)
+            {
+                if (open.WindowState == FormWindowState.Minimized) open.WindowState = FormWindowState.Normal;
+                open.Activate();
+                return;
+            }
+            new T().Show(this);
+        }
+
         private void purchaseToolStripMenuItem_Click(object sender, EventArgs e)
         {
             // Open the purchase invoices form when the menu item is clicked
@@ -71,6 +88,9 @@ namespace Inventory
 
         // Reports > Daily sales summary
         private void dailySalesReportToolStripMenuItem_Click(object sender, EventArgs e) => OpenReport(new Reports.DailySalesReport());
+
+        // Reports > Sales by item (profit)
+        private void salesByItemReportToolStripMenuItem_Click(object sender, EventArgs e) => OpenReport(new Reports.SalesByItemReport());
 
         // Each report opens in the shared report screen (several reports can be open at once)
         private void OpenReport(Reports.ReportDefinition report)
@@ -90,6 +110,13 @@ namespace Inventory
         private void usersToolStripMenuItem_Click(object sender, EventArgs e)
         {
             using var form = new UsersForm();
+            form.ShowDialog(this);
+        }
+
+        // Settings > Receipt printer: this computer's 80 mm printer and the receipt footer
+        private void receiptPrinterToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            using var form = new ReceiptPrinterForm();
             form.ShowDialog(this);
         }
 

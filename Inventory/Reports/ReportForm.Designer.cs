@@ -263,6 +263,7 @@
             cardsPanel.Size = new Size(1280, 110);
             cardsPanel.TabIndex = 2;
             cardsPanel.WrapContents = false;
+            cardsPanel.Resize += cardsPanel_Resize;
             //
             // filterLabel
             //

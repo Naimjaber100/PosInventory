@@ -1,6 +1,7 @@
 ﻿using System.ComponentModel;
 using System.Globalization;
 using Inventory.Models;
+using Inventory.Printing;
 using Inventory.Repositories;
 using Inventory.Validation;
 
@@ -36,7 +37,7 @@ namespace Inventory
         private TextBox _entry;            // where the keypad types (barcode box or discount box)
         private bool _returnMode;          // Return (F4): the scanned items come back and are refunded
         private UserModel? _returnApprover;  // the Manager who opened the return (password asked at Return)
-        private Button _payButton = null!, _returnButton = null!, _holdButton = null!, _recallButton = null!;
+        private Button _payButton = null!, _quickCashButton = null!, _returnButton = null!, _holdButton = null!, _recallButton = null!;
         private static readonly Color ReturnRed = Color.FromArgb(192, 57, 43);
 
         public CashierForm()
@@ -68,7 +69,40 @@ namespace Inventory
             UpdateInfo();
             UpdateTotals();
             await LoadCurrenciesAsync();
+            try { await ReceiptSettings.LoadAsync(); }
+            catch { /* no receipt settings: sales still work, nothing prints */ }
         }
+
+        #region Receipt printing
+
+        private int? _lastSaleId;   // the last sale / return saved here, for Reprint (Ctrl+P)
+        private bool _noPrinterShown;
+
+        // Prints in the background right after the sale; a problem only shows in the status line (the sale is saved)
+        private async void PrintReceipt(int saleId, bool reprint = false)
+        {
+            _lastSaleId = saleId;
+            var settings = ReceiptSettings.Current;
+            if (!reprint && (settings == null || !settings.PrintAfterSale)) return;
+            if (!reprint && settings is { HasPrinter: false })
+            {
+                if (_noPrinterShown) return;   // say it once, not after every sale
+                _noPrinterShown = true;
+            }
+
+            var problem = await ReceiptPrinter.PrintSaleAsync(saleId, _currencies);
+            if (problem != null) ShowStatus(problem + "  ·  Ctrl+P to print it again", Color.Khaki);
+            else if (reprint) ShowStatus("Receipt printed again.", Color.Gainsboro);
+        }
+
+        private void ReprintLast()
+        {
+            if (_lastSaleId is not int id) { ShowStatus("No receipt to print yet: finish a sale first (or use Sales F7).", Color.Khaki); return; }
+            PrintReceipt(id, reprint: true);
+            FocusScan();
+        }
+
+        #endregion
 
         private void CashierForm_Shown(object? sender, EventArgs e) => FocusScan();
 
@@ -158,6 +192,23 @@ namespace Inventory
             salesButton.Click += (_, _) => ShowSales();
             topBar.Controls.Add(salesButton);
 
+            // Reprint (top bar, Ctrl+P): the receipt of the last sale or return again
+            var reprintButton = new Button
+            {
+                Text = "Reprint",
+                Dock = DockStyle.Right,
+                Width = 100,
+                Font = new Font("Segoe UI Semibold", 10F, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                ForeColor = Color.White,
+                BackColor = Dark,
+                TabStop = false,
+                UseVisualStyleBackColor = false,
+            };
+            reprintButton.FlatAppearance.BorderColor = Color.Gray;
+            reprintButton.Click += (_, _) => ReprintLast();
+            topBar.Controls.Add(reprintButton);
+
             // Log out (top bar, right): back to the login screen, after the open-sale check of FormClosing
             var logOutButton = new Button
             {
@@ -175,12 +226,19 @@ namespace Inventory
             logOutButton.Click += (_, _) => { if (!AppSession.LogOut()) FocusScan(); };
             topBar.Controls.Add(logOutButton);
 
+            // Quick cash (F11): the exact total paid in cash (primary currency), no payment window
+            _quickCashButton = MakeButton("CASH\n(F11)", 15F, async (_, _) => await QuickCashAsync());
+            _quickCashButton.BackColor = Color.FromArgb(46, 125, 50);
+            _quickCashButton.ForeColor = Color.White;
+            _quickCashButton.FlatAppearance.BorderSize = 0;
+            actionsTable.Controls.Add(_quickCashButton, 0, 1);
+
             _payButton = MakeButton("PAY  (F12)", 22F, async (_, _) => await PayOrRefundAsync());
             _payButton.BackColor = Accent;
             _payButton.ForeColor = Color.White;
             _payButton.FlatAppearance.BorderSize = 0;
-            actionsTable.Controls.Add(_payButton, 0, 1);
-            actionsTable.SetColumnSpan(_payButton, 3);
+            actionsTable.Controls.Add(_payButton, 1, 1);
+            actionsTable.SetColumnSpan(_payButton, 2);
         }
 
         private static Button MakeButton(string text, float fontSize, EventHandler onClick)
@@ -375,6 +433,7 @@ namespace Inventory
             var scanEmpty = scanBox.Text.Length == 0;
             switch (keyData)
             {
+                case Keys.Control | Keys.P: ReprintLast(); return true;
                 case Keys.F1: FocusScan(); return true;
                 case Keys.F2: SetQuantity(); return true;
                 case Keys.F4: ToggleReturnMode(); return true;
@@ -384,6 +443,7 @@ namespace Inventory
                 case Keys.F8: _ = HoldAsync(); return true;
                 case Keys.F9: _ = RecallAsync(); return true;
                 case Keys.F10: VoidSale(); return true;
+                case Keys.F11: _ = QuickCashAsync(); return true;
                 case Keys.F12: _ = PayOrRefundAsync(); return true;
                 case Keys.Escape:
                     if (_entry.Text.Length > 0) _entry.Clear(); else FocusScan();
@@ -771,10 +831,32 @@ namespace Inventory
             using var payment = new PaymentForm(total, _currencies);
             if (payment.ShowDialog(this) != DialogResult.OK) { FocusScan(); return; }
 
+            await SaveSaleAsync(payment.Payments, discount);
+        }
+
+        // Quick cash (F11): the customer pays the exact total in cash, in the primary currency. No payment window, no change.
+        private async Task QuickCashAsync()
+        {
+            if (_returnMode) { ShowStatus("Quick cash is for sales. Use REFUND (F12) for a return.", Color.Khaki); return; }
+            if (_saving) return;
+            if (!ValidateSale(out var discount)) return;
+            var total = SubTotal - discount;
+
+            var cash = new SalePaymentModel { Method = PaymentMethod.Cash, Currency = _currencies.Primary.Code, Amount = total };
+            await SaveSaleAsync(new[] { cash }, discount);
+        }
+
+        private bool _saving;   // stops a double press of F11 / F12 from saving the same sale twice
+
+        private async Task SaveSaleAsync(IEnumerable<SalePaymentModel> payments, decimal discount)
+        {
+            if (_saving) return;
             try
             {
+                _saving = true;
                 UseWaitCursor = true;
-                var result = await _saleRepository.SaveSaleAsync(_lines, payment.Payments, discount, _heldSaleId, AppConfig.CurrentUserId);
+                var result = await _saleRepository.SaveSaleAsync(_lines, payments, discount, _heldSaleId, AppConfig.CurrentUserId);
+                PrintReceipt(result.SaleId);
                 ClearSale();
 
                 lastItemName.Text = $"Invoice {result.InvoiceNo}";
@@ -791,6 +873,7 @@ namespace Inventory
             }
             finally
             {
+                _saving = false;
                 UseWaitCursor = false;
                 FocusScan();
             }
@@ -933,7 +1016,8 @@ namespace Inventory
             _payButton.BackColor = on ? ReturnRed : Accent;
             _returnButton.Text = on ? "Sale  (F4)" : "Return  (F4)";
             _returnButton.BackColor = on ? Color.FromArgb(253, 226, 222) : Color.FromArgb(244, 246, 248);
-            _holdButton.Enabled = _recallButton.Enabled = !on;
+            _holdButton.Enabled = _recallButton.Enabled = _quickCashButton.Enabled = !on;
+            _quickCashButton.BackColor = on ? Color.FromArgb(200, 205, 210) : Color.FromArgb(46, 125, 50);
             discountBox.Clear();
             discountBox.Enabled = percentCheck.Enabled = !on;   // a return has no invoice discount
             totalCaption.Text = on ? "Refund" : "TOTAL";
@@ -960,6 +1044,7 @@ namespace Inventory
             {
                 UseWaitCursor = true;
                 var result = await _saleRepository.SaveReturnAsync(_lines, how.Method, how.Currency, AppConfig.CurrentUserId);
+                PrintReceipt(result.ReturnId);
                 try
                 {
                     await _saleRepository.AddAuditAsync("refund_approved", "sales_invoices", result.ReturnId,

@@ -10,6 +10,9 @@ namespace Inventory.Models
         public string? SupplierName { get; set; }
         public DateTime InvoiceDate { get; set; } = DateTime.Today;
         public decimal ExchangeRate { get; set; }
+        public string? Currency { get; set; }          // the invoice currency (null = primary); costs and the discount are in it
+        public decimal CurrencyRate { get; set; } = 1; // 1 unit of it in the primary currency
+        public decimal TotalLbp { get; set; }          // total in the primary currency
         public decimal SubTotal { get; set; }
         public decimal Discount { get; set; }
         public decimal Total { get; set; }

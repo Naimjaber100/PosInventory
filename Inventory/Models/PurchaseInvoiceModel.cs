@@ -12,7 +12,9 @@ namespace Inventory.Models
         [Browsable(false)] public int SupplierId { get; set; }
         [DisplayName("Supplier")] public string? SupplierName { get; set; }
         [DisplayName("Items")] public long ItemCount { get; set; }
-        [DisplayName("Total")] public decimal Total { get; set; }
+        [DisplayName("Total")] public decimal Total { get; set; }                 // in the purchase currency
+        [DisplayName("Cur.")] public string Currency { get; set; } = "LBP";
+        [DisplayName("Total (LBP)")] public decimal TotalLbp { get; set; }        // in the primary currency
         [DisplayName("Paid")] public decimal PaidLbp { get; set; }
         [DisplayName("Balance")] public decimal? BalanceLbp { get; set; }
         [DisplayName("Total $")] public decimal TotalUsd { get; set; }

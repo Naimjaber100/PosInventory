@@ -8,7 +8,7 @@ namespace Inventory
     // Purchase > "Read invoice (AI)": choose a photo of the supplier's invoice, the AI (OpenAI, appsettings.json)
     // reads its lines and each line is matched to an item of the system (fuzzy name, packaging, barcode).
     // Nothing is added before the user checked it: change the item, quantity or price, untick a line to skip it.
-    // Prices on the invoice can be in another currency: they are converted to the primary currency.
+    // Prices stay in the invoice currency; the purchase converts them to its own currency when it differs.
     public partial class AiPurchaseImportForm : Form
     {
         private const string ChooseText = "— choose an item —";
@@ -56,16 +56,21 @@ namespace Inventory
             }
         }
 
-        /// <summary>The checked lines (after DialogResult.OK): item, quantity, unit cost in the primary currency.</summary>
+        /// <summary>The checked lines (after DialogResult.OK): item, quantity, unit cost in the invoice currency (CurrencyCode).</summary>
         public List<(PackagingLookupModel Item, decimal Quantity, decimal UnitCost)> Lines { get; } = new();
 
-        public string? InvoiceNumber => string.IsNullOrWhiteSpace(_invoice?.InvoiceNumber) ? null : _invoice.InvoiceNumber.Trim();
+        public string? SupplierName => string.IsNullOrWhiteSpace(_invoice?.SupplierName) ? null : _invoice.SupplierName.Trim();
+        public string? InvoiceNumber =>string.IsNullOrWhiteSpace(_invoice?.InvoiceNumber) ? null : _invoice.InvoiceNumber.Trim();
 
         public DateTime? InvoiceDate =>
             DateTime.TryParseExact(_invoice?.InvoiceDate, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d) ? d : null;
 
-        /// <summary>The invoice discount converted to the primary currency (null when none was read).</summary>
-        public decimal? Discount => _invoice?.Discount is decimal d && d > 0 ? Math.Round(d * Rate, 2) : null;
+        /// <summary>The invoice discount in the invoice currency (null when none was read).</summary>
+        public decimal? Discount => _invoice?.Discount is decimal d && d > 0 ? Math.Round(d, 2) : null;
+
+        /// <summary>The currency the prices are in (chosen on this screen, or read on the invoice) and its rate to the primary.</summary>
+        public string CurrencyCode => SelectedCurrency?.Code ?? _currencies.Primary.Code;
+        public decimal CurrencyRate => Rate;
 
         private async void AiPurchaseImportForm_Load(object? sender, EventArgs e)
         {
@@ -339,7 +344,7 @@ namespace Inventory
                     : score >= 0.75m ? Color.FromArgb(34, 139, 117) : score >= GoodMatch ? Color.FromArgb(217, 119, 6) : Color.Firebrick;
 
                 var price = ParseDecimal(gridRow.Cells[priceColumn.Index].Value);
-                var cost = price is { } p ? Math.Round(p * rate, 2) : row.Chosen?.LastCost;
+                var cost = price ?? (row.Chosen is { } chosen ? Math.Round(chosen.LastCost / rate, 2) : null);   // in the invoice currency
                 gridRow.Cells[costColumn.Index].Value = cost;
                 gridRow.Cells[costColumn.Index].Style.ForeColor = price == null ? Color.DarkGoldenrod : Color.FromArgb(22, 32, 43);
                 gridRow.Cells[costColumn.Index].ToolTipText = price == null ? "No price was read: the item's last cost is used. Check it." : string.Empty;
@@ -353,7 +358,7 @@ namespace Inventory
             addButton.Enabled = ready > 0;
             addButton.Text = ready == 1 ? "Add 1 line to the purchase" : $"Add {ready} lines to the purchase";
             var currency = SelectedCurrency;
-            rateLabel.Text = currency == null || currency.IsPrimary ? string.Empty : $"converted at {currency.RateText}";
+            rateLabel.Text = currency == null || currency.IsPrimary ? string.Empty : currency.RateText;
         }
 
         private IEnumerable<DataGridViewRow> ReadyRows() =>
@@ -425,7 +430,7 @@ namespace Inventory
             {
                 var row = (RowData)gridRow.Tag!;
                 var qty = ParseDecimal(gridRow.Cells[qtyColumn.Index].Value) ?? 0;
-                var cost = ParseDecimal(gridRow.Cells[costColumn.Index].Value) ?? row.Chosen!.LastCost;
+                var cost = ParseDecimal(gridRow.Cells[costColumn.Index].Value) ?? Math.Round(row.Chosen!.LastCost / Rate, 2);
                 Lines.Add((row.Chosen!, qty, Math.Max(0, cost)));
             }
             if (Lines.Count == 0) return;

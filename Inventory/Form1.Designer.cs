@@ -33,14 +33,19 @@
             companyToolStripMenuItem = new ToolStripMenuItem();
             currenciesToolStripMenuItem = new ToolStripMenuItem();
             usersToolStripMenuItem = new ToolStripMenuItem();
+            receiptPrinterToolStripMenuItem = new ToolStripMenuItem();
             itemToolStripMenuItem = new ToolStripMenuItem();
             itemListToolStripMenuItem = new ToolStripMenuItem();
             categoryToolStripMenuItem = new ToolStripMenuItem();
             quickButtonsToolStripMenuItem = new ToolStripMenuItem();
+            contactsToolStripMenuItem = new ToolStripMenuItem();
+            clientsToolStripMenuItem = new ToolStripMenuItem();
+            suppliersToolStripMenuItem = new ToolStripMenuItem();
             purchaseToolStripMenuItem = new ToolStripMenuItem();
             invoiceToolStripMenuItem = new ToolStripMenuItem();
             reportsToolStripMenuItem = new ToolStripMenuItem();
             dailySalesReportToolStripMenuItem = new ToolStripMenuItem();
+            salesByItemReportToolStripMenuItem = new ToolStripMenuItem();
             cashierToolStripMenuItem = new ToolStripMenuItem();
             menuStrip1.SuspendLayout();
             SuspendLayout();
@@ -48,7 +53,7 @@
             // menuStrip1
             // 
             menuStrip1.ImageScalingSize = new Size(20, 20);
-            menuStrip1.Items.AddRange(new ToolStripItem[] { settingsToolStripMenuItem, itemToolStripMenuItem, purchaseToolStripMenuItem, invoiceToolStripMenuItem, reportsToolStripMenuItem, cashierToolStripMenuItem });
+            menuStrip1.Items.AddRange(new ToolStripItem[] { settingsToolStripMenuItem, itemToolStripMenuItem, contactsToolStripMenuItem, purchaseToolStripMenuItem, invoiceToolStripMenuItem, reportsToolStripMenuItem, cashierToolStripMenuItem });
             menuStrip1.Location = new Point(0, 0);
             menuStrip1.Name = "menuStrip1";
             menuStrip1.Size = new Size(1684, 28);
@@ -57,7 +62,7 @@
             //
             // settingsToolStripMenuItem
             //
-            settingsToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { companyToolStripMenuItem, currenciesToolStripMenuItem, usersToolStripMenuItem });
+            settingsToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { companyToolStripMenuItem, currenciesToolStripMenuItem, usersToolStripMenuItem, receiptPrinterToolStripMenuItem });
             settingsToolStripMenuItem.Name = "settingsToolStripMenuItem";
             settingsToolStripMenuItem.Size = new Size(76, 24);
             settingsToolStripMenuItem.Text = "Settings";
@@ -82,6 +87,13 @@
             usersToolStripMenuItem.Size = new Size(224, 26);
             usersToolStripMenuItem.Text = "Users";
             usersToolStripMenuItem.Click += usersToolStripMenuItem_Click;
+            //
+            // receiptPrinterToolStripMenuItem
+            //
+            receiptPrinterToolStripMenuItem.Name = "receiptPrinterToolStripMenuItem";
+            receiptPrinterToolStripMenuItem.Size = new Size(260, 26);
+            receiptPrinterToolStripMenuItem.Text = "Receipt printer";
+            receiptPrinterToolStripMenuItem.Click += receiptPrinterToolStripMenuItem_Click;
             //
             // itemToolStripMenuItem
             //
@@ -110,6 +122,27 @@
             quickButtonsToolStripMenuItem.Text = "POS buttons (cashier)";
             quickButtonsToolStripMenuItem.Click += quickButtonsToolStripMenuItem_Click;
             // 
+            // contactsToolStripMenuItem
+            //
+            contactsToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { clientsToolStripMenuItem, suppliersToolStripMenuItem });
+            contactsToolStripMenuItem.Name = "contactsToolStripMenuItem";
+            contactsToolStripMenuItem.Size = new Size(82, 24);
+            contactsToolStripMenuItem.Text = "Contacts";
+            //
+            // clientsToolStripMenuItem
+            //
+            clientsToolStripMenuItem.Name = "clientsToolStripMenuItem";
+            clientsToolStripMenuItem.Size = new Size(224, 26);
+            clientsToolStripMenuItem.Text = "Clients";
+            clientsToolStripMenuItem.Click += clientsToolStripMenuItem_Click;
+            //
+            // suppliersToolStripMenuItem
+            //
+            suppliersToolStripMenuItem.Name = "suppliersToolStripMenuItem";
+            suppliersToolStripMenuItem.Size = new Size(224, 26);
+            suppliersToolStripMenuItem.Text = "Suppliers";
+            suppliersToolStripMenuItem.Click += suppliersToolStripMenuItem_Click;
+            //
             // purchaseToolStripMenuItem
             // 
             purchaseToolStripMenuItem.Name = "purchaseToolStripMenuItem";
@@ -125,7 +158,7 @@
             //
             // reportsToolStripMenuItem
             //
-            reportsToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { dailySalesReportToolStripMenuItem });
+            reportsToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { dailySalesReportToolStripMenuItem, salesByItemReportToolStripMenuItem });
             reportsToolStripMenuItem.Name = "reportsToolStripMenuItem";
             reportsToolStripMenuItem.Size = new Size(74, 24);
             reportsToolStripMenuItem.Text = "Reports";
@@ -136,6 +169,13 @@
             dailySalesReportToolStripMenuItem.Size = new Size(240, 26);
             dailySalesReportToolStripMenuItem.Text = "Daily sales summary";
             dailySalesReportToolStripMenuItem.Click += dailySalesReportToolStripMenuItem_Click;
+            //
+            // salesByItemReportToolStripMenuItem
+            //
+            salesByItemReportToolStripMenuItem.Name = "salesByItemReportToolStripMenuItem";
+            salesByItemReportToolStripMenuItem.Size = new Size(240, 26);
+            salesByItemReportToolStripMenuItem.Text = "Sales by item (profit)";
+            salesByItemReportToolStripMenuItem.Click += salesByItemReportToolStripMenuItem_Click;
             // 
             // cashierToolStripMenuItem
             // 
@@ -167,14 +207,19 @@
         private ToolStripMenuItem companyToolStripMenuItem;
         private ToolStripMenuItem currenciesToolStripMenuItem;
         private ToolStripMenuItem usersToolStripMenuItem;
+        private ToolStripMenuItem receiptPrinterToolStripMenuItem;
         private ToolStripMenuItem itemToolStripMenuItem;
         private ToolStripMenuItem itemListToolStripMenuItem;
         private ToolStripMenuItem categoryToolStripMenuItem;
         private ToolStripMenuItem quickButtonsToolStripMenuItem;
+        private ToolStripMenuItem contactsToolStripMenuItem;
+        private ToolStripMenuItem clientsToolStripMenuItem;
+        private ToolStripMenuItem suppliersToolStripMenuItem;
         private ToolStripMenuItem purchaseToolStripMenuItem;
         private ToolStripMenuItem invoiceToolStripMenuItem;
         private ToolStripMenuItem reportsToolStripMenuItem;
         private ToolStripMenuItem dailySalesReportToolStripMenuItem;
+        private ToolStripMenuItem salesByItemReportToolStripMenuItem;
         private ToolStripMenuItem cashierToolStripMenuItem;
     }
 }

@@ -229,6 +229,36 @@ namespace Inventory
                 e.CellStyle.ForeColor = Color.Firebrick;
         }
 
+        #region Receipt
+
+        // Print receipt: the selected invoice again on this computer's receipt printer
+        private async void printButton_Click(object? sender, EventArgs e)
+        {
+            if (invoicesGrid.CurrentRow?.DataBoundItem is not SaleHistoryModel sale) return;
+            printButton.Enabled = false;
+            var problem = await Printing.ReceiptPrinter.PrintSaleAsync(sale.SaleId, _currencies);
+            printButton.Enabled = true;
+            if (problem != null) MessageBox.Show(this, problem, "Print receipt", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+
+        // Receipt preview: the selected invoice as it prints (works without a printer)
+        private async void previewReceiptButton_Click(object? sender, EventArgs e)
+        {
+            if (invoicesGrid.CurrentRow?.DataBoundItem is not SaleHistoryModel sale) return;
+            try
+            {
+                var settings = Printing.ReceiptSettings.Current ?? await Printing.ReceiptSettings.LoadAsync();
+                if (await _saleRepository.GetReceiptAsync(sale.SaleId) is { } receipt)
+                    Printing.ReceiptPrinter.ShowPreview(this, receipt, _currencies, settings);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, "Could not show the receipt:\n" + ex.Message, "Receipt", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        #endregion
+
         private void linesGrid_CellFormatting(object? sender, DataGridViewCellFormattingEventArgs e)
         {
             if (e.RowIndex < 0 || e.CellStyle == null || linesGrid.Columns[e.ColumnIndex].DataPropertyName != nameof(SaleHistoryLineModel.LineProfit)) return;

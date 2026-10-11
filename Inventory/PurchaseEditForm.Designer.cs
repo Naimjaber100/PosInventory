@@ -36,7 +36,14 @@
             dateLabel = new Label();
             dateInput = new DateTimePicker();
             supplierLabel = new Label();
-            supplierValue = new Label();
+            supplierCombo = new ComboBox();
+            currencyLabel = new Label();
+            currencyCombo = new ComboBox();
+            rateLabel = new Label();
+            rateInput = new NumericUpDown();
+            rateUnitLabel = new Label();
+            totalLbpValue = new Label();
+            addSupplierButton = new Button();
             statusLabel = new Label();
             statusValue = new Label();
             notesLabel = new Label();
@@ -63,6 +70,7 @@
             saveDraftButton = new Button();
             headerGroup.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)discountInput).BeginInit();
+            ((System.ComponentModel.ISupportInitialize)rateInput).BeginInit();
             itemsGroup.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)linesGrid).BeginInit();
             scanPanel.SuspendLayout();
@@ -78,7 +86,8 @@
             headerGroup.Controls.Add(dateLabel);
             headerGroup.Controls.Add(dateInput);
             headerGroup.Controls.Add(supplierLabel);
-            headerGroup.Controls.Add(supplierValue);
+            headerGroup.Controls.Add(supplierCombo);
+            headerGroup.Controls.Add(addSupplierButton);
             headerGroup.Controls.Add(statusLabel);
             headerGroup.Controls.Add(statusValue);
             headerGroup.Controls.Add(notesLabel);
@@ -89,12 +98,18 @@
             headerGroup.Controls.Add(discountInput);
             headerGroup.Controls.Add(totalLabel);
             headerGroup.Controls.Add(totalValue);
+            headerGroup.Controls.Add(currencyLabel);
+            headerGroup.Controls.Add(currencyCombo);
+            headerGroup.Controls.Add(rateLabel);
+            headerGroup.Controls.Add(rateInput);
+            headerGroup.Controls.Add(rateUnitLabel);
+            headerGroup.Controls.Add(totalLbpValue);
             headerGroup.Dock = DockStyle.Top;
             headerGroup.Font = new Font("Segoe UI", 9.5F);
             headerGroup.Location = new Point(10, 10);
             headerGroup.Name = "headerGroup";
             headerGroup.Padding = new Padding(10);
-            headerGroup.Size = new Size(1180, 150);
+            headerGroup.Size = new Size(1180, 190);
             headerGroup.TabIndex = 0;
             headerGroup.TabStop = false;
             headerGroup.Text = "Invoice";
@@ -133,7 +148,7 @@
             supplierInvoiceText.MaxLength = 50;
             supplierInvoiceText.Name = "supplierInvoiceText";
             supplierInvoiceText.Size = new Size(220, 29);
-            supplierInvoiceText.TabIndex = 0;
+            supplierInvoiceText.TabIndex = 1;
             supplierInvoiceText.TextChanged += headerField_Changed;
             // 
             // dateLabel
@@ -152,7 +167,7 @@
             dateInput.Location = new Point(170, 106);
             dateInput.Name = "dateInput";
             dateInput.Size = new Size(220, 29);
-            dateInput.TabIndex = 1;
+            dateInput.TabIndex = 2;
             dateInput.ValueChanged += headerField_Changed;
             // 
             // supplierLabel
@@ -164,16 +179,29 @@
             supplierLabel.TabIndex = 4;
             supplierLabel.Text = "Supplier";
             // 
-            // supplierValue
-            // 
-            supplierValue.AutoSize = true;
-            supplierValue.ForeColor = Color.DimGray;
-            supplierValue.Location = new Point(500, 34);
-            supplierValue.Name = "supplierValue";
-            supplierValue.Size = new Size(350, 21);
-            supplierValue.TabIndex = 5;
-            supplierValue.Text = "(optional for now - added with the supplier form)";
-            // 
+            // supplierCombo
+            //
+            supplierCombo.AutoCompleteMode = AutoCompleteMode.SuggestAppend;
+            supplierCombo.AutoCompleteSource = AutoCompleteSource.ListItems;
+            supplierCombo.DropDownHeight = 300;
+            supplierCombo.IntegralHeight = false;
+            supplierCombo.Location = new Point(500, 30);
+            supplierCombo.Name = "supplierCombo";
+            supplierCombo.Size = new Size(286, 29);
+            supplierCombo.TabIndex = 0;
+            supplierCombo.SelectedIndexChanged += supplierCombo_SelectedIndexChanged;
+            supplierCombo.Validating += supplierCombo_Validating;
+            //
+            // addSupplierButton
+            //
+            addSupplierButton.Location = new Point(790, 29);
+            addSupplierButton.Name = "addSupplierButton";
+            addSupplierButton.Size = new Size(34, 31);
+            addSupplierButton.TabIndex = 5;
+            addSupplierButton.TabStop = false;
+            addSupplierButton.Text = "+";
+            addSupplierButton.Click += addSupplierButton_Click;
+            //
             // statusLabel
             // 
             statusLabel.AutoSize = true;
@@ -208,7 +236,7 @@
             notesText.MaxLength = 250;
             notesText.Name = "notesText";
             notesText.Size = new Size(320, 29);
-            notesText.TabIndex = 2;
+            notesText.TabIndex = 3;
             notesText.TextChanged += headerField_Changed;
             // 
             // subTotalLabel
@@ -249,7 +277,7 @@
             discountInput.Maximum = new decimal(new int[] { -727379968, 232, 0, 0 });
             discountInput.Name = "discountInput";
             discountInput.Size = new Size(180, 29);
-            discountInput.TabIndex = 3;
+            discountInput.TabIndex = 4;
             discountInput.TextAlign = HorizontalAlignment.Right;
             discountInput.ThousandsSeparator = true;
             discountInput.ValueChanged += discountInput_ValueChanged;
@@ -275,17 +303,76 @@
             totalValue.TabIndex = 13;
             totalValue.Text = "0";
             totalValue.TextAlign = ContentAlignment.MiddleRight;
-            // 
+            //
+            // currencyLabel
+            //
+            currencyLabel.AutoSize = true;
+            currencyLabel.Location = new Point(16, 150);
+            currencyLabel.Name = "currencyLabel";
+            currencyLabel.Size = new Size(71, 21);
+            currencyLabel.TabIndex = 14;
+            currencyLabel.Text = "Currency";
+            //
+            // currencyCombo
+            //
+            currencyCombo.DropDownStyle = ComboBoxStyle.DropDownList;
+            currencyCombo.Location = new Point(170, 146);
+            currencyCombo.Name = "currencyCombo";
+            currencyCombo.Size = new Size(90, 29);
+            currencyCombo.TabIndex = 5;
+            currencyCombo.SelectedIndexChanged += currencyCombo_SelectedIndexChanged;
+            //
+            // rateLabel
+            //
+            rateLabel.Location = new Point(266, 150);
+            rateLabel.Name = "rateLabel";
+            rateLabel.Size = new Size(70, 21);
+            rateLabel.TabIndex = 15;
+            rateLabel.Text = "1 USD =";
+            rateLabel.TextAlign = ContentAlignment.TopRight;
+            //
+            // rateInput
+            //
+            rateInput.DecimalPlaces = 2;
+            rateInput.Location = new Point(340, 146);
+            rateInput.Maximum = new decimal(new int[] { 1000000000, 0, 0, 0 });
+            rateInput.Name = "rateInput";
+            rateInput.Size = new Size(150, 29);
+            rateInput.TabIndex = 6;
+            rateInput.TextAlign = HorizontalAlignment.Right;
+            rateInput.ThousandsSeparator = true;
+            rateInput.ValueChanged += rateInput_ValueChanged;
+            //
+            // rateUnitLabel
+            //
+            rateUnitLabel.AutoSize = true;
+            rateUnitLabel.ForeColor = Color.DimGray;
+            rateUnitLabel.Location = new Point(496, 150);
+            rateUnitLabel.Name = "rateUnitLabel";
+            rateUnitLabel.Size = new Size(36, 21);
+            rateUnitLabel.TabIndex = 16;
+            rateUnitLabel.Text = "LBP";
+            //
+            // totalLbpValue
+            //
+            totalLbpValue.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            totalLbpValue.ForeColor = Color.DimGray;
+            totalLbpValue.Location = new Point(880, 146);
+            totalLbpValue.Name = "totalLbpValue";
+            totalLbpValue.Size = new Size(280, 28);
+            totalLbpValue.TabIndex = 17;
+            totalLbpValue.TextAlign = ContentAlignment.MiddleRight;
+            //
             // itemsGroup
-            // 
+            //
             itemsGroup.Controls.Add(linesGrid);
             itemsGroup.Controls.Add(scanPanel);
             itemsGroup.Dock = DockStyle.Fill;
             itemsGroup.Font = new Font("Segoe UI", 9.5F);
-            itemsGroup.Location = new Point(10, 160);
+            itemsGroup.Location = new Point(10, 200);
             itemsGroup.Name = "itemsGroup";
             itemsGroup.Padding = new Padding(10);
-            itemsGroup.Size = new Size(1180, 478);
+            itemsGroup.Size = new Size(1180, 438);
             itemsGroup.TabIndex = 1;
             itemsGroup.TabStop = false;
             itemsGroup.Text = "Items";
@@ -465,6 +552,7 @@
             headerGroup.ResumeLayout(false);
             headerGroup.PerformLayout();
             ((System.ComponentModel.ISupportInitialize)discountInput).EndInit();
+            ((System.ComponentModel.ISupportInitialize)rateInput).EndInit();
             itemsGroup.ResumeLayout(false);
             ((System.ComponentModel.ISupportInitialize)linesGrid).EndInit();
             scanPanel.ResumeLayout(false);
@@ -483,7 +571,14 @@
         private Label dateLabel;
         private DateTimePicker dateInput;
         private Label supplierLabel;
-        private Label supplierValue;
+        private ComboBox supplierCombo;
+        private Label currencyLabel;
+        private ComboBox currencyCombo;
+        private Label rateLabel;
+        private NumericUpDown rateInput;
+        private Label rateUnitLabel;
+        private Label totalLbpValue;
+        private Button addSupplierButton;
         private Label statusLabel;
         private Label statusValue;
         private Label notesLabel;

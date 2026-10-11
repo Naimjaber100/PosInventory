@@ -3,12 +3,39 @@
 -- Apply:  psql -h localhost -U postgres -d Pos -f purchase_functions.sql
 
 -- ---------------------------------------------------------------------------
--- Supplier is optional for now (until the supplier form exists).
--- To make it required again later:
---   ALTER TABLE purchase_invoices ALTER COLUMN supplier_id SET NOT NULL;
---   and change the LEFT JOIN below back to JOIN.
+-- Supplier: a draft may be saved without one; posting needs one (fn_purchase_save),
+-- because posting adds the total to what we owe that supplier (suppliers.balance_lbp).
+-- The column stays nullable for drafts and for older purchases entered before suppliers existed.
 -- ---------------------------------------------------------------------------
 ALTER TABLE public.purchase_invoices ALTER COLUMN supplier_id DROP NOT NULL;
+
+-- ---------------------------------------------------------------------------
+-- Purchase currency: a purchase is entered in the currency of the supplier's invoice.
+--   unit_cost, line_total, sub_total, discount, total  = in that currency
+--   currency_rate = 1 unit of it in the primary currency (1 for the primary), kept with the invoice
+--   total_lbp     = total in the primary currency (what the supplier balance, payments and costs use)
+-- Item costs (avg_cost) and supplier balances stay in the primary currency: posting converts.
+-- exchange_rate (USD rate when entered) is kept for the "Total $" column.
+-- ---------------------------------------------------------------------------
+ALTER TABLE public.purchase_invoices ADD COLUMN IF NOT EXISTS currency char(3);
+ALTER TABLE public.purchase_invoices ADD COLUMN IF NOT EXISTS currency_rate numeric(18,6) NOT NULL DEFAULT 1;
+ALTER TABLE public.purchase_invoices ADD COLUMN IF NOT EXISTS total_lbp numeric(18,2) NOT NULL DEFAULT 0;
+-- Purchases entered before this were all in the primary currency
+UPDATE public.purchase_invoices
+SET currency = (SELECT code FROM currencies WHERE is_primary), currency_rate = 1, total_lbp = total
+WHERE currency IS NULL;
+ALTER TABLE public.purchase_invoices ALTER COLUMN currency SET NOT NULL;
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'purchase_invoices_currency_fkey') THEN
+        ALTER TABLE public.purchase_invoices
+            ADD CONSTRAINT purchase_invoices_currency_fkey FOREIGN KEY (currency) REFERENCES currencies(code);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'purchase_invoices_currency_rate_check') THEN
+        ALTER TABLE public.purchase_invoices
+            ADD CONSTRAINT purchase_invoices_currency_rate_check CHECK (currency_rate > 0);
+    END IF;
+END $$;
 
 CREATE OR REPLACE VIEW public.v_purchase_list AS
  SELECT pi.purchase_id,
@@ -17,24 +44,28 @@ CREATE OR REPLACE VIEW public.v_purchase_list AS
     pi.supplier_id,
     s.name AS supplier_name,
     pi.invoice_date,
-    pi.total,
+    pi.total,                                   -- in the purchase currency
     pi.paid_lbp,
         CASE
-            WHEN pi.status = 1 THEN pi.total - pi.paid_lbp
+            WHEN pi.status = 1 THEN pi.total_lbp - pi.paid_lbp
             ELSE NULL::numeric
         END AS balance_lbp,
-    round(pi.total / pi.exchange_rate, 2) AS total_usd,
+    CASE WHEN pi.currency = 'USD' THEN pi.total
+         ELSE round(pi.total * pi.currency_rate / pi.exchange_rate, 2) END AS total_usd,
         CASE pi.status
             WHEN 0 THEN 'Draft'::text
             WHEN 2 THEN 'Cancelled'::text
             ELSE
             CASE
-                WHEN pi.paid_lbp >= pi.total THEN 'Paid'::text
+                WHEN pi.paid_lbp >= pi.total_lbp THEN 'Paid'::text
                 WHEN pi.paid_lbp > 0::numeric THEN 'Part paid'::text
                 ELSE 'Unpaid'::text
             END
         END AS status_text,
-    pi.status
+    pi.status,
+    pi.currency,
+    pi.currency_rate,
+    round(pi.total * pi.currency_rate, 2) AS total_lbp   -- drafts too (posted: equals pi.total_lbp)
    FROM purchase_invoices pi
      LEFT JOIN suppliers s ON s.supplier_id = pi.supplier_id;
 
@@ -58,7 +89,7 @@ RETURNS TABLE (
     purchase_id integer, purchase_no varchar, supplier_invoice_no varchar,
     supplier_id integer, supplier_name varchar, invoice_date date,
     total numeric, paid_lbp numeric, balance_lbp numeric, total_usd numeric,
-    status smallint, status_text text, item_count bigint,
+    status smallint, status_text text, item_count bigint, currency text, total_lbp numeric,
     created_by_name varchar, posted_by_name varchar,
     total_count bigint)
 LANGUAGE plpgsql STABLE
@@ -81,6 +112,7 @@ BEGIN
            v.total, v.paid_lbp, v.balance_lbp, v.total_usd,
            v.status, v.status_text,
            (SELECT count(*) FROM purchase_lines l WHERE l.purchase_id = v.purchase_id),
+           v.currency::text, v.total_lbp,
            cu.full_name, pu.full_name,
            count(*) OVER ()
     FROM v_purchase_list v
@@ -125,12 +157,14 @@ CREATE OR REPLACE FUNCTION public.fn_purchase_get_by_id(p_purchase_id integer)
 RETURNS TABLE (
     purchase_id integer, purchase_no varchar, supplier_invoice_no varchar, supplier_id integer,
     supplier_name varchar, invoice_date date, exchange_rate numeric, sub_total numeric,
-    discount numeric, total numeric, paid_lbp numeric, status smallint, notes varchar)
+    discount numeric, total numeric, paid_lbp numeric, status smallint, notes varchar,
+    currency text, currency_rate numeric, total_lbp numeric)
 LANGUAGE sql STABLE
 AS $$
     SELECT pi.purchase_id, pi.purchase_no, pi.supplier_invoice_no, pi.supplier_id,
            s.name, pi.invoice_date, pi.exchange_rate, pi.sub_total,
-           pi.discount, pi.total, pi.paid_lbp, pi.status, pi.notes
+           pi.discount, pi.total, pi.paid_lbp, pi.status, pi.notes,
+           pi.currency::text, pi.currency_rate, round(pi.total * pi.currency_rate, 2)
     FROM purchase_invoices pi
     LEFT JOIN suppliers s ON s.supplier_id = pi.supplier_id
     WHERE pi.purchase_id = p_purchase_id;
@@ -188,8 +222,11 @@ END $$;
 --   (item and pack size come from the packaging; line totals are recalculated here).
 -- p_post = true also posts it through fn_post_purchase: stock and average cost are
 --   updated, the invoice gets its number and can no longer be changed.
+-- p_currency = the invoice currency (NULL = primary); unit costs and the discount are in it.
+-- p_currency_rate = 1 unit of it in the primary currency (NULL = today's rate; always 1 for the primary).
 -- Returns the purchase_id. All or nothing.
 -- ---------------------------------------------------------------------------
+DROP FUNCTION IF EXISTS public.fn_purchase_save(integer, integer, text, date, numeric, text, jsonb, boolean, integer);
 CREATE OR REPLACE FUNCTION public.fn_purchase_save(
     p_purchase_id         integer,
     p_supplier_id         integer,
@@ -199,21 +236,45 @@ CREATE OR REPLACE FUNCTION public.fn_purchase_save(
     p_notes               text,
     p_lines               jsonb,
     p_post                boolean,
-    p_user_id             integer)
+    p_user_id             integer,
+    p_currency            text    DEFAULT NULL,
+    p_currency_rate       numeric DEFAULT NULL)
 RETURNS integer
 LANGUAGE plpgsql
 AS $$
 DECLARE
-    v_id     integer := p_purchase_id;
-    v_status smallint;
-    v_rate   numeric;
-    v_sub    numeric;
-    v_lines  integer;
+    v_id       integer := p_purchase_id;
+    v_status   smallint;
+    v_rate     numeric;
+    v_sub      numeric;
+    v_lines    integer;
+    v_currency text;
+    v_cur_rate numeric;
 BEGIN
+    -- Currency and its rate
+    v_currency := upper(coalesce(nullif(trim(p_currency), ''), (SELECT code FROM currencies WHERE is_primary)));
+    IF NOT EXISTS (SELECT 1 FROM currencies WHERE code = v_currency AND is_active) THEN
+        RAISE EXCEPTION 'The currency % is not active. Choose another one or activate it in Settings > Currencies.', v_currency;
+    END IF;
+    IF (SELECT is_primary FROM currencies WHERE code = v_currency) THEN
+        v_cur_rate := 1;
+    ELSE
+        v_cur_rate := coalesce(p_currency_rate, fn_currency_rate(v_currency));
+        IF v_cur_rate IS NULL OR v_cur_rate <= 0 THEN
+            RAISE EXCEPTION 'Enter the exchange rate of % for this purchase.', v_currency;
+        END IF;
+    END IF;
+
     IF coalesce(p_discount, 0) < 0 THEN RAISE EXCEPTION 'Discount cannot be negative.'; END IF;
     IF jsonb_typeof(coalesce(p_lines, '[]'::jsonb)) <> 'array' THEN RAISE EXCEPTION 'Lines must be a JSON array.'; END IF;
     IF p_supplier_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM suppliers WHERE supplier_id = p_supplier_id) THEN
         RAISE EXCEPTION 'Supplier % not found.', p_supplier_id;
+    END IF;
+    -- A draft can wait for its supplier; a posted purchase adds to what we owe that supplier, so it needs one
+    IF p_post AND p_supplier_id IS NULL THEN RAISE EXCEPTION 'Choose the supplier before posting.'; END IF;
+    IF p_supplier_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM suppliers WHERE supplier_id = p_supplier_id AND is_active)
+       AND p_supplier_id IS DISTINCT FROM (SELECT supplier_id FROM purchase_invoices WHERE purchase_id = p_purchase_id) THEN
+        RAISE EXCEPTION 'This supplier is inactive. Activate it in Contacts > Suppliers first.';
     END IF;
 
     -- Header
@@ -222,9 +283,9 @@ BEGIN
         IF v_rate IS NULL THEN RAISE EXCEPTION 'Set the exchange rate before entering purchases.'; END IF;
 
         INSERT INTO purchase_invoices (supplier_id, supplier_invoice_no, invoice_date, exchange_rate,
-                                       discount, notes, status, user_id)
+                                       discount, notes, status, user_id, currency, currency_rate)
         VALUES (p_supplier_id, nullif(trim(p_supplier_invoice_no), ''), coalesce(p_invoice_date, CURRENT_DATE), v_rate,
-                coalesce(p_discount, 0), nullif(trim(p_notes), ''), 0, p_user_id)
+                coalesce(p_discount, 0), nullif(trim(p_notes), ''), 0, p_user_id, v_currency, v_cur_rate)
         RETURNING purchase_id INTO v_id;
     ELSE
         SELECT status INTO v_status FROM purchase_invoices WHERE purchase_id = v_id FOR UPDATE;
@@ -236,7 +297,9 @@ BEGIN
             supplier_invoice_no = nullif(trim(p_supplier_invoice_no), ''),
             invoice_date = coalesce(p_invoice_date, CURRENT_DATE),
             discount = coalesce(p_discount, 0),
-            notes = nullif(trim(p_notes), '')
+            notes = nullif(trim(p_notes), ''),
+            currency = v_currency,
+            currency_rate = v_cur_rate
         WHERE purchase_id = v_id;
 
         DELETE FROM purchase_lines WHERE purchase_id = v_id;
@@ -270,13 +333,101 @@ BEGIN
     -- Totals
     SELECT coalesce(sum(line_total), 0) INTO v_sub FROM purchase_lines WHERE purchase_id = v_id;
     IF v_sub - coalesce(p_discount, 0) < 0 THEN RAISE EXCEPTION 'The discount is bigger than the invoice.'; END IF;
-    UPDATE purchase_invoices SET sub_total = v_sub, total = v_sub - coalesce(p_discount, 0) WHERE purchase_id = v_id;
+    UPDATE purchase_invoices
+    SET sub_total = v_sub, total = v_sub - coalesce(p_discount, 0),
+        total_lbp = round((v_sub - coalesce(p_discount, 0)) * v_cur_rate, 2)
+    WHERE purchase_id = v_id;
 
     IF p_post THEN
         PERFORM fn_post_purchase(v_id, p_user_id);
     END IF;
 
     RETURN v_id;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- Posts a draft purchase: stock goes up, the average cost is updated, the invoice gets its
+-- number and the supplier balance goes up. Amounts on the invoice are in its currency;
+-- costs and the supplier balance are in the primary currency (converted with currency_rate).
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.fn_post_purchase(p_purchase_id integer, p_user_id integer)
+RETURNS text
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_inv       purchase_invoices%ROWTYPE;
+    v_sub       numeric;
+    v_total     numeric;
+    v_total_lbp numeric;
+    v_ratio     numeric;
+    v_no        text;
+    v_bad       text;
+BEGIN
+    SELECT * INTO v_inv FROM purchase_invoices WHERE purchase_id = p_purchase_id FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Purchase invoice % not found.', p_purchase_id; END IF;
+    IF v_inv.status <> 0 THEN RAISE EXCEPTION 'This purchase is already posted or cancelled.'; END IF;
+    IF NOT EXISTS (SELECT 1 FROM purchase_lines WHERE purchase_id = p_purchase_id) THEN
+        RAISE EXCEPTION 'The purchase has no lines.';
+    END IF;
+
+    -- Item and pack size always come from the packaging, never from the screen
+    UPDATE purchase_lines l SET product_id = pk.product_id, factor = pk.factor
+    FROM product_packaging pk
+    WHERE pk.packaging_id = l.packaging_id AND l.purchase_id = p_purchase_id
+      AND (l.product_id <> pk.product_id OR l.factor <> pk.factor);
+
+    SELECT p.name INTO v_bad
+    FROM purchase_lines l JOIN products p ON p.product_id = l.product_id
+    JOIN product_packaging pk ON pk.packaging_id = l.packaging_id
+    WHERE l.purchase_id = p_purchase_id AND (p.product_type <> 1 OR NOT pk.can_purchase)
+    LIMIT 1;
+    IF v_bad IS NOT NULL THEN RAISE EXCEPTION '"%" cannot be purchased with this packaging.', v_bad; END IF;
+
+    SELECT p.name INTO v_bad
+    FROM purchase_lines l JOIN products p ON p.product_id = l.product_id
+    WHERE l.purchase_id = p_purchase_id AND NOT p.is_weighted AND l.base_qty <> trunc(l.base_qty)
+    LIMIT 1;
+    IF v_bad IS NOT NULL THEN RAISE EXCEPTION '"%" is bought in whole units only.', v_bad; END IF;
+
+    -- Recalculate the totals (never trust what the screen sent)
+    UPDATE purchase_lines SET line_total = round(quantity * unit_cost, 2) WHERE purchase_id = p_purchase_id;
+    SELECT sum(line_total) INTO v_sub FROM purchase_lines WHERE purchase_id = p_purchase_id;
+    v_total := v_sub - v_inv.discount;
+    IF v_total < 0 THEN RAISE EXCEPTION 'The discount is bigger than the invoice.'; END IF;
+    v_ratio := CASE WHEN v_sub = 0 THEN 1 ELSE v_total / v_sub END;   -- spreads the invoice discount on the cost
+    v_total_lbp := round(v_total * v_inv.currency_rate, 2);
+
+    -- Incoming quantity and cost per base unit in the primary currency, per product
+    IF to_regclass('pg_temp._in') IS NOT NULL THEN DROP TABLE pg_temp._in; END IF;
+    CREATE TEMP TABLE _in ON COMMIT DROP AS
+    SELECT product_id,
+           sum(base_qty) AS qty,
+           sum(line_total) * v_ratio * v_inv.currency_rate / sum(base_qty) AS cost
+    FROM purchase_lines WHERE purchase_id = p_purchase_id
+    GROUP BY product_id;
+
+    PERFORM 1 FROM products WHERE product_id IN (SELECT product_id FROM _in) ORDER BY product_id FOR UPDATE;
+
+    UPDATE products p
+    SET avg_cost  = CASE WHEN p.stock_qty <= 0 THEN i.cost
+                         ELSE (p.stock_qty * p.avg_cost + i.qty * i.cost) / (p.stock_qty + i.qty) END,
+        stock_qty = p.stock_qty + i.qty,
+        updated_at = now()
+    FROM _in i WHERE p.product_id = i.product_id;
+
+    INSERT INTO stock_movements (product_id, movement_type, quantity, unit_cost, balance_after, ref_type, ref_id, user_id)
+    SELECT i.product_id, 1, i.qty, i.cost, p.stock_qty, 1, p_purchase_id, p_user_id
+    FROM _in i JOIN products p ON p.product_id = i.product_id;
+
+    v_no := coalesce(v_inv.purchase_no, fn_next_doc_no('P'));
+
+    UPDATE purchase_invoices
+    SET purchase_no = v_no, sub_total = v_sub, total = v_total, total_lbp = v_total_lbp, status = 1, posted_at = now()
+    WHERE purchase_id = p_purchase_id;
+
+    UPDATE suppliers SET balance_lbp = balance_lbp + v_total_lbp WHERE supplier_id = v_inv.supplier_id;
+
+    RETURN v_no;
 END $$;
 
 -- ---------------------------------------------------------------------------

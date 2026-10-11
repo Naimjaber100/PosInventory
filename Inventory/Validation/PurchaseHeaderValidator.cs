@@ -25,8 +25,9 @@ namespace Inventory.Validation
             if (!header.IsDraft)
                 result.Add("This purchase is already posted or cancelled and cannot be changed.");
 
-            // Supplier is optional until the supplier form exists. To require it later:
-            // if (header.SupplierId == null) result.Add("Choose a supplier.", nameof(PurchaseHeaderModel.SupplierId));
+            // A draft can wait for its supplier; posting adds the total to what we owe the supplier, so it needs one
+            if (post && header.SupplierId == null)
+                result.Add("Choose the supplier before posting.", nameof(PurchaseHeaderModel.SupplierId));
 
             if (header.InvoiceDate.Date > DateTime.Today)
                 result.Add("Invoice date cannot be in the future.", nameof(PurchaseHeaderModel.InvoiceDate));

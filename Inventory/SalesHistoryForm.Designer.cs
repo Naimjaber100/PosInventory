@@ -48,6 +48,8 @@ namespace Inventory
             linesCaption = new Label();
             bottomPanel = new FlowLayoutPanel();
             closeButton = new Button();
+            printButton = new Button();
+            previewReceiptButton = new Button();
             filterPanel.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)invoicesGrid).BeginInit();
             linesPanel.SuspendLayout();
@@ -243,6 +245,8 @@ namespace Inventory
             // bottomPanel
             //
             bottomPanel.Controls.Add(closeButton);
+            bottomPanel.Controls.Add(printButton);
+            bottomPanel.Controls.Add(previewReceiptButton);
             bottomPanel.Dock = DockStyle.Bottom;
             bottomPanel.FlowDirection = FlowDirection.RightToLeft;
             bottomPanel.Name = "bottomPanel";
@@ -258,6 +262,24 @@ namespace Inventory
             closeButton.Size = new Size(120, 42);
             closeButton.TabIndex = 0;
             closeButton.Text = "Close (Esc)";
+            //
+            // printButton
+            //
+            printButton.Font = new Font("Segoe UI Semibold", 10F, FontStyle.Bold);
+            printButton.Name = "printButton";
+            printButton.Size = new Size(160, 42);
+            printButton.TabIndex = 1;
+            printButton.Text = "Print receipt";
+            printButton.Click += printButton_Click;
+            //
+            // previewReceiptButton
+            //
+            previewReceiptButton.Font = new Font("Segoe UI", 10F);
+            previewReceiptButton.Name = "previewReceiptButton";
+            previewReceiptButton.Size = new Size(150, 42);
+            previewReceiptButton.TabIndex = 2;
+            previewReceiptButton.Text = "Receipt preview";
+            previewReceiptButton.Click += previewReceiptButton_Click;
             //
             // SalesHistoryForm
             //
@@ -309,5 +331,7 @@ namespace Inventory
         private Label linesCaption;
         private FlowLayoutPanel bottomPanel;
         private Button closeButton;
+        private Button printButton;
+        private Button previewReceiptButton;
     }
 }

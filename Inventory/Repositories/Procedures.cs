@@ -12,6 +12,7 @@ namespace Inventory.Repositories
 
         // Reports (Database/report_functions.sql)
         public const string ReportDailySales = "fn_report_daily_sales";
+        public const string ReportSalesByItem = "fn_report_sales_by_item";
 
         // Company, one record (Database/company_functions.sql)
         public const string GetCompany = "fn_company_get";
@@ -58,11 +59,20 @@ namespace Inventory.Repositories
         public const string SaveReturn = "fn_save_return";
         public const string SalesByUser = "fn_sales_by_user";
         public const string SaleGetLines = "fn_sale_get_lines";
+        public const string SaleReceipt = "fn_sale_receipt";   // Database/receipt_functions.sql
         public const string AddAudit = "fn_audit_add";
         public const string SaveSale = "fn_save_sale";
         public const string HoldSale = "fn_hold_sale";
         public const string GetSetting = "fn_setting";
         public const string SetSetting = "fn_setting_set";   // Database/quick_button_functions.sql
+
+        // Clients and suppliers (Database/party_functions.sql)
+        public const string GetCustomers = "fn_customer_get_all";
+        public const string SaveCustomer = "fn_customer_save";
+        public const string DeleteCustomer = "fn_customer_delete";
+        public const string GetSuppliers = "fn_supplier_get_all";
+        public const string SaveSupplier = "fn_supplier_save";
+        public const string DeleteSupplier = "fn_supplier_delete";
 
         // Cashier quick buttons and their groups (Database/quick_button_functions.sql)
         public const string GetQuickGroups = "fn_quick_group_get_all";
