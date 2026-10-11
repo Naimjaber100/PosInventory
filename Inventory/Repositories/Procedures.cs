@@ -13,6 +13,7 @@ namespace Inventory.Repositories
         // Reports (Database/report_functions.sql)
         public const string ReportDailySales = "fn_report_daily_sales";
         public const string ReportSalesByItem = "fn_report_sales_by_item";
+        public const string ReportSalesByInvoice = "fn_report_sales_by_invoice";
 
         // Company, one record (Database/company_functions.sql)
         public const string GetCompany = "fn_company_get";

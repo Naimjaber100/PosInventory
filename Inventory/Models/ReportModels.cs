@@ -79,3 +79,56 @@ namespace Inventory.Models
         };
     }
 }
+
+namespace Inventory.Models
+{
+    // Report 3 - Sales by invoice: one row of fn_report_sales_by_invoice (amounts in the primary currency;
+    // a return has negative amounts). The report adds a TOTAL row at the end (IsTotal).
+    public class SalesByInvoiceRow
+    {
+        public const short ReturnType = 2;
+
+        [Browsable(false)] public int SaleId { get; set; }
+        [Browsable(false)] public bool IsTotal { get; set; }
+        [Browsable(false)] public short InvoiceType { get; set; }
+
+        [DisplayName("Invoice")] public string InvoiceNo { get; set; } = string.Empty;
+        [DisplayName("Type")] public string TypeText => IsTotal ? string.Empty : InvoiceType == ReturnType ? "Return" : "Sale";
+
+        [DisplayName("Date")]
+        public DateTime? InvoiceDate
+        {
+            get => _invoiceDate;
+            set => _invoiceDate = value is { Kind: DateTimeKind.Utc } utc ? utc.ToLocalTime() : value;
+        }
+        private DateTime? _invoiceDate;
+
+        [DisplayName("Cashier")] public string? Cashier { get; set; }
+        [DisplayName("Client")] public string? Customer { get; set; }
+        [DisplayName("Lines")] public long ItemCount { get; set; }
+        [DisplayName("Qty")] public decimal Quantity { get; set; }
+        [DisplayName("Gross")] public decimal Gross { get; set; }
+        [DisplayName("Discounts")] public decimal Discounts { get; set; }
+        [DisplayName("Total")] public decimal Total { get; set; }
+        [DisplayName("Cost")] public decimal Cost { get; set; }
+        [DisplayName("Profit")] public decimal Profit { get; set; }
+        [DisplayName("Margin %")] public decimal? Margin => Total > 0 ? Math.Round(Profit / Total * 100, 1) : null;
+        [DisplayName("Paid with")] public string? Payments { get; set; }
+
+        [Browsable(false)] public bool IsReturn => InvoiceType == ReturnType;
+
+        /// <summary>The TOTAL row of a list of invoices (returns are already negative, so this is the net).</summary>
+        public static SalesByInvoiceRow TotalOf(IReadOnlyCollection<SalesByInvoiceRow> invoices) => new()
+        {
+            IsTotal = true,
+            InvoiceNo = $"TOTAL  ({invoices.Count} invoices)",
+            ItemCount = invoices.Sum(i => i.ItemCount),
+            Quantity = invoices.Sum(i => i.Quantity),
+            Gross = invoices.Sum(i => i.Gross),
+            Discounts = invoices.Sum(i => i.Discounts),
+            Total = invoices.Sum(i => i.Total),
+            Cost = invoices.Sum(i => i.Cost),
+            Profit = invoices.Sum(i => i.Profit),
+        };
+    }
+}

@@ -44,8 +44,10 @@
             purchaseToolStripMenuItem = new ToolStripMenuItem();
             invoiceToolStripMenuItem = new ToolStripMenuItem();
             reportsToolStripMenuItem = new ToolStripMenuItem();
+            salesReportsToolStripMenuItem = new ToolStripMenuItem();
             dailySalesReportToolStripMenuItem = new ToolStripMenuItem();
             salesByItemReportToolStripMenuItem = new ToolStripMenuItem();
+            salesByInvoiceReportToolStripMenuItem = new ToolStripMenuItem();
             cashierToolStripMenuItem = new ToolStripMenuItem();
             menuStrip1.SuspendLayout();
             SuspendLayout();
@@ -158,10 +160,17 @@
             //
             // reportsToolStripMenuItem
             //
-            reportsToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { dailySalesReportToolStripMenuItem, salesByItemReportToolStripMenuItem });
+            reportsToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { salesReportsToolStripMenuItem });
             reportsToolStripMenuItem.Name = "reportsToolStripMenuItem";
             reportsToolStripMenuItem.Size = new Size(74, 24);
             reportsToolStripMenuItem.Text = "Reports";
+            //
+            // salesReportsToolStripMenuItem
+            //
+            salesReportsToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { dailySalesReportToolStripMenuItem, salesByInvoiceReportToolStripMenuItem, salesByItemReportToolStripMenuItem });
+            salesReportsToolStripMenuItem.Name = "salesReportsToolStripMenuItem";
+            salesReportsToolStripMenuItem.Size = new Size(240, 26);
+            salesReportsToolStripMenuItem.Text = "Sales";
             //
             // dailySalesReportToolStripMenuItem
             //
@@ -176,6 +185,13 @@
             salesByItemReportToolStripMenuItem.Size = new Size(240, 26);
             salesByItemReportToolStripMenuItem.Text = "Sales by item (profit)";
             salesByItemReportToolStripMenuItem.Click += salesByItemReportToolStripMenuItem_Click;
+            //
+            // salesByInvoiceReportToolStripMenuItem
+            //
+            salesByInvoiceReportToolStripMenuItem.Name = "salesByInvoiceReportToolStripMenuItem";
+            salesByInvoiceReportToolStripMenuItem.Size = new Size(240, 26);
+            salesByInvoiceReportToolStripMenuItem.Text = "Sales by invoice (profit)";
+            salesByInvoiceReportToolStripMenuItem.Click += salesByInvoiceReportToolStripMenuItem_Click;
             // 
             // cashierToolStripMenuItem
             // 
@@ -218,8 +234,10 @@
         private ToolStripMenuItem purchaseToolStripMenuItem;
         private ToolStripMenuItem invoiceToolStripMenuItem;
         private ToolStripMenuItem reportsToolStripMenuItem;
+        private ToolStripMenuItem salesReportsToolStripMenuItem;
         private ToolStripMenuItem dailySalesReportToolStripMenuItem;
         private ToolStripMenuItem salesByItemReportToolStripMenuItem;
+        private ToolStripMenuItem salesByInvoiceReportToolStripMenuItem;
         private ToolStripMenuItem cashierToolStripMenuItem;
     }
 }

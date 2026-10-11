@@ -86,11 +86,14 @@ namespace Inventory
             purchaseForm.Show(this);
         }
 
-        // Reports > Daily sales summary
+        // Reports > Sales > Daily sales summary
         private void dailySalesReportToolStripMenuItem_Click(object sender, EventArgs e) => OpenReport(new Reports.DailySalesReport());
 
-        // Reports > Sales by item (profit)
+        // Reports > Sales > Sales by item (profit)
         private void salesByItemReportToolStripMenuItem_Click(object sender, EventArgs e) => OpenReport(new Reports.SalesByItemReport());
+
+        // Reports > Sales > Sales by invoice (profit)
+        private void salesByInvoiceReportToolStripMenuItem_Click(object sender, EventArgs e) => OpenReport(new Reports.SalesByInvoiceReport());
 
         // Each report opens in the shared report screen (several reports can be open at once)
         private void OpenReport(Reports.ReportDefinition report)

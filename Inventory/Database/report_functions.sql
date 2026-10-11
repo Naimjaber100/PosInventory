@@ -113,3 +113,48 @@ AS $$
     LEFT JOIN categories c ON c.category_id = p.category_id
     ORDER BY i.net_sales DESC, p.name;
 $$;
+
+DROP FUNCTION IF EXISTS public.fn_report_sales_by_invoice(date, date, integer);
+
+-- ---------------------------------------------------------------------------
+-- 3. Sales by invoice: one row per sale and return invoice from p_from to p_to, in time order.
+-- p_user_id NULL = every cashier. A return has negative amounts, so the columns add up to the net.
+--   gross     = quantity x price before any discount
+--   discounts = line discounts + invoice discount
+--   total     = what the invoice came to (what the customer paid / got back)
+--   cost      = cost of the items (average cost when sold)
+--   profit    = total - cost
+--   payments  = how it was paid, e.g. "USD 10.00 + LBP 305,000"
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.fn_report_sales_by_invoice(p_from date, p_to date, p_user_id integer DEFAULT NULL)
+RETURNS TABLE (sale_id integer, invoice_no varchar, invoice_type smallint, invoice_date timestamptz,
+               cashier varchar, customer varchar, item_count bigint, quantity numeric,
+               gross numeric, discounts numeric, total numeric, cost numeric, profit numeric, payments text)
+LANGUAGE sql STABLE
+AS $$
+    SELECT si.sale_id, si.invoice_no, si.invoice_type, si.invoice_date,
+           u.full_name,
+           CASE WHEN cu.customer_id <> 1 THEN cu.name END,   -- 1 = walk-in customer
+           l.item_count,
+           l.quantity * s.sign,
+           round(l.gross * s.sign, 2),
+           round((l.gross - si.total) * s.sign, 2),
+           si.total * s.sign,
+           si.total_cost * s.sign,
+           si.profit * s.sign,
+           (SELECT string_agg(trim(p.currency) || ' ' || to_char(p.amount, 'FM999,999,999,990.##')
+                              || CASE p.method WHEN 2 THEN ' card' WHEN 3 THEN ' account' ELSE '' END, ' + ' ORDER BY p.payment_id)
+            FROM sales_payments p WHERE p.sale_id = si.sale_id)
+    FROM sales_invoices si
+    CROSS JOIN LATERAL (SELECT CASE WHEN si.invoice_type = 2 THEN -1 ELSE 1 END AS sign) s
+    CROSS JOIN LATERAL (SELECT count(*) AS item_count, coalesce(sum(sl.quantity), 0) AS quantity,
+                               coalesce(sum(sl.quantity * sl.unit_price), 0) AS gross
+                        FROM sales_lines sl WHERE sl.sale_id = si.sale_id) l
+    LEFT JOIN users u ON u.user_id = si.user_id
+    LEFT JOIN customers cu ON cu.customer_id = si.customer_id
+    WHERE si.status = 1
+      AND si.invoice_date >= (p_from::timestamp AT TIME ZONE current_setting('TimeZone'))
+      AND si.invoice_date <  ((p_to + 1)::timestamp AT TIME ZONE current_setting('TimeZone'))
+      AND (p_user_id IS NULL OR si.user_id = p_user_id)
+    ORDER BY si.invoice_date, si.sale_id;
+$$;

@@ -30,5 +30,16 @@ namespace Inventory.Repositories
 
             return (await GetListAsync<SalesByItemRow>(Procedures.ReportSalesByItem, parameters)).ToList();
         }
+
+        /// <summary>Report 3: one row per sale / return invoice in the period, in time order. userId null = every cashier.</summary>
+        public async Task<List<SalesByInvoiceRow>> GetSalesByInvoiceAsync(DateTime from, DateTime to, int? userId)
+        {
+            var parameters = new DynamicParameters();
+            parameters.Add("p_from", from.Date, DbType.Date);
+            parameters.Add("p_to", to.Date, DbType.Date);
+            parameters.Add("p_user_id", userId, DbType.Int32);
+
+            return (await GetListAsync<SalesByInvoiceRow>(Procedures.ReportSalesByInvoice, parameters)).ToList();
+        }
     }
 }
