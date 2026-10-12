@@ -57,6 +57,7 @@ namespace Inventory
 
         private async void SalesHistoryForm_Load(object? sender, EventArgs e)
         {
+            FitToScreen();
             try { _currencies = await new CurrencyRepository().GetSetAsync(); } catch { /* default LBP / USD */ }
 
             // A Manager can look at every cashier; a User only at their own sales
@@ -85,6 +86,16 @@ namespace Inventory
             Text = AppSession.IsManager ? "Sales" : $"My sales  -  {AppSession.UserName}";
             _loading = false;
             await LoadSalesAsync();
+        }
+
+        // On a small screen the window is taller than the screen: shrink it so the buttons at the bottom (Print receipt) stay visible
+        private void FitToScreen()
+        {
+            var area = Screen.FromControl(this).WorkingArea;
+            if (Width <= area.Width && Height <= area.Height) return;
+            MinimumSize = Size.Empty;
+            Size = new Size(Math.Min(Width, area.Width), Math.Min(Height, area.Height));
+            Location = new Point(area.X + (area.Width - Width) / 2, area.Y + (area.Height - Height) / 2);
         }
 
         private int? SelectedUserId =>
@@ -217,6 +228,7 @@ namespace Inventory
                     column.DefaultCellStyle.Font = new Font(grid.Font, FontStyle.Bold);
             }
             if (grid.Columns[nameof(SaleHistoryModel.Payments)] is { } payments) payments.FillWeight = 160;
+            if (grid.Columns[nameof(SaleHistoryModel.PayStatus)] is { } status) status.FillWeight = 130;
         }
 
         // Returns in red; a loss in red on the profit column
@@ -227,6 +239,8 @@ namespace Inventory
             if (sale.IsReturn) e.CellStyle.ForeColor = Color.FromArgb(192, 57, 43);
             else if (invoicesGrid.Columns[e.ColumnIndex].DataPropertyName == nameof(SaleHistoryModel.Profit) && sale.Profit < 0)
                 e.CellStyle.ForeColor = Color.Firebrick;
+            else if (invoicesGrid.Columns[e.ColumnIndex].DataPropertyName == nameof(SaleHistoryModel.PayStatus))
+                e.CellStyle.ForeColor = sale.IsUnpaid ? Color.DarkOrange : Color.FromArgb(34, 139, 117);
         }
 
         #region Receipt

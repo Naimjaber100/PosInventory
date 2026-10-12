@@ -41,5 +41,33 @@ namespace Inventory.Repositories
 
             return (await GetListAsync<SalesByInvoiceRow>(Procedures.ReportSalesByInvoice, parameters)).ToList();
         }
+
+        /// <summary>Report 5: one row per client who still owes something now, biggest amount first.</summary>
+        public async Task<List<UnpaidByCustomerRow>> GetUnpaidByCustomerAsync()
+        {
+            return (await GetListAsync<UnpaidByCustomerRow>(Procedures.ReportUnpaidByCustomer)).ToList();
+        }
+
+        /// <summary>Report 6: the unpaid sales and payments of a client in the period, in time order. customerId null = every client.</summary>
+        public async Task<List<CustomerStatementRow>> GetCustomerStatementAsync(DateTime from, DateTime to, int? customerId)
+        {
+            var parameters = new DynamicParameters();
+            parameters.Add("p_from", from.Date, DbType.Date);
+            parameters.Add("p_to", to.Date, DbType.Date);
+            parameters.Add("p_customer_id", customerId, DbType.Int32);
+
+            return (await GetListAsync<CustomerStatementRow>(Procedures.ReportCustomerStatement, parameters)).ToList();
+        }
+
+        /// <summary>Report 4: one row per day with its sales and what is still unpaid of them. userId null = every cashier.</summary>
+        public async Task<List<SalesUnpaidRow>> GetSalesUnpaidAsync(DateTime from, DateTime to, int? userId)
+        {
+            var parameters = new DynamicParameters();
+            parameters.Add("p_from", from.Date, DbType.Date);
+            parameters.Add("p_to", to.Date, DbType.Date);
+            parameters.Add("p_user_id", userId, DbType.Int32);
+
+            return (await GetListAsync<SalesUnpaidRow>(Procedures.ReportSalesUnpaid, parameters)).ToList();
+        }
     }
 }

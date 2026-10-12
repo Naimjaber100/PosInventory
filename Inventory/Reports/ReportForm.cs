@@ -8,6 +8,8 @@ namespace Inventory.Reports
     public partial class ReportForm : Form
     {
         private const int AllUsers = 0;
+        private const int AllCustomers = 0;
+        private const int WalkInCustomerId = 1;
 
         private readonly ReportDefinition _report;
         private CurrencySet _currencies = CurrencySet.Default;
@@ -23,6 +25,13 @@ namespace Inventory.Reports
             descriptionLabel.Text = report.Description;
             hintLabel.Text = report.DoubleClickHint ?? string.Empty;
             userCaption.Visible = userCombo.Visible = report.UsesCashierFilter;
+            customerCaption.Visible = customerCombo.Visible = report.UsesCustomerFilter;
+            if (!report.UsesPeriodFilter)
+            {
+                foreach (Control control in filterPanel.Controls)
+                    if (control != userCaption && control != userCombo && control != customerCaption && control != customerCombo) control.Visible = false;
+                filterPanel.Visible = report.UsesCashierFilter || report.UsesCustomerFilter;
+            }
             (fromPicker.Value, toPicker.Value) = report.DefaultPeriod;
         }
 
@@ -47,6 +56,25 @@ namespace Inventory.Reports
                     userCaption.Visible = userCombo.Visible = false;
                 }
             }
+            if (_report.UsesCustomerFilter)
+            {
+                try
+                {
+                    // Every client, also the inactive ones (their history stays); not the walk-in customer
+                    var customers = (await new CustomerRepository().GetAllAsync(null, includeInactive: true))
+                        .Where(c => c.CustomerId != WalkInCustomerId).ToList();
+                    customerCombo.DisplayMember = "Name";
+                    customerCombo.ValueMember = "Id";
+                    customerCombo.DataSource = new[] { new { Id = AllCustomers, Name = "All clients" } }
+                        .Concat(customers.Select(c => new { Id = c.CustomerId, Name = c.Name + (string.IsNullOrWhiteSpace(c.Phone) ? string.Empty : $"  ·  {c.Phone}") }))
+                        .ToList();
+                    customerCombo.SelectedValue = AllCustomers;
+                }
+                catch
+                {
+                    customerCaption.Visible = customerCombo.Visible = false;
+                }
+            }
             _loading = false;
             await LoadReportAsync();
         }
@@ -56,12 +84,15 @@ namespace Inventory.Reports
             if (_loading) return;
             if (toPicker.Value.Date < fromPicker.Value.Date) toPicker.Value = fromPicker.Value;
             var userId = userCombo.Visible && userCombo.SelectedValue is int id && id != AllUsers ? id : (int?)null;
+            var customerId = customerCombo.Visible && customerCombo.SelectedValue is int cid && cid != AllCustomers ? cid : (int?)null;
             _filter = new ReportFilter
             {
                 From = fromPicker.Value.Date,
                 To = toPicker.Value.Date,
                 UserId = userId,
                 UserName = userId == null ? "All users" : userCombo.Text,
+                CustomerId = customerId,
+                CustomerName = customerId == null ? "All clients" : customerCombo.Text,
                 Currencies = _currencies,
             };
 
@@ -72,7 +103,10 @@ namespace Inventory.Reports
                 var result = await _report.LoadAsync(_filter);
                 grid.DataSource = result.Rows;
                 ShowCards(result.Cards);
-                filterLabel.Text = $"{_filter.PeriodText}   ·   {_filter.UserName}   ·   amounts in {_currencies.Primary.Code}";
+                filterLabel.Text = (_report.UsesPeriodFilter ? _filter.PeriodText : $"As of {DateTime.Now:ddd dd/MM/yyyy HH:mm}")
+                                   + (_report.UsesCashierFilter ? $"   ·   {_filter.UserName}" : string.Empty)
+                                   + (_report.UsesCustomerFilter ? $"   ·   {_filter.CustomerName}" : string.Empty)
+                                   + $"   ·   amounts in {_currencies.Primary.Code}";
                 timeLabel.Text = $"{result.Rows.Count} row(s) in {(DateTime.Now - started).TotalSeconds:0.00} s";
             }
             catch (Exception ex)
@@ -159,6 +193,8 @@ namespace Inventory.Reports
 
         private async void userCombo_SelectedIndexChanged(object? sender, EventArgs e) => await LoadReportAsync();
 
+        private async void customerCombo_SelectedIndexChanged(object? sender, EventArgs e) => await LoadReportAsync();
+
         private async void refreshButton_Click(object? sender, EventArgs e) => await LoadReportAsync();
 
         #endregion
@@ -192,7 +228,9 @@ namespace Inventory.Reports
             {
                 Title = "Export to Excel",
                 Filter = "Excel workbook (*.xlsx)|*.xlsx",
-                FileName = $"{_report.Title} {_filter.From:yyyy-MM-dd} to {_filter.To:yyyy-MM-dd}.xlsx",
+                FileName = _report.UsesPeriodFilter
+                    ? $"{_report.Title} {_filter.From:yyyy-MM-dd} to {_filter.To:yyyy-MM-dd}.xlsx"
+                    : $"{_report.Title} {DateTime.Today:yyyy-MM-dd}.xlsx",
             };
             if (dialog.ShowDialog(this) != DialogResult.OK) return;
 

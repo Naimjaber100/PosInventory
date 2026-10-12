@@ -16,6 +16,12 @@ namespace Inventory.Reports
         /// <summary>Shows the Cashier filter (All users or one cashier).</summary>
         public virtual bool UsesCashierFilter => true;
 
+        /// <summary>Shows the Client filter (All clients or one client).</summary>
+        public virtual bool UsesCustomerFilter => false;
+
+        /// <summary>Shows the period filter; false for a report of how things are now (no dates).</summary>
+        public virtual bool UsesPeriodFilter => true;
+
         /// <summary>The period the report opens with (This month by default).</summary>
         public virtual (DateTime From, DateTime To) DefaultPeriod => (new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1), DateTime.Today);
 
@@ -43,6 +49,8 @@ namespace Inventory.Reports
         public DateTime To { get; init; }
         public int? UserId { get; init; }                 // null = every cashier
         public string UserName { get; init; } = "All users";
+        public int? CustomerId { get; init; }             // null = every client
+        public string CustomerName { get; init; } = "All clients";
         public CurrencySet Currencies { get; init; } = CurrencySet.Default;
 
         public string PeriodText => From.Date == To.Date ? From.ToString("ddd dd/MM/yyyy") : $"{From:dd/MM/yyyy} - {To:dd/MM/yyyy}";

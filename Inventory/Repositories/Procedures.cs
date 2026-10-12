@@ -14,6 +14,9 @@ namespace Inventory.Repositories
         public const string ReportDailySales = "fn_report_daily_sales";
         public const string ReportSalesByItem = "fn_report_sales_by_item";
         public const string ReportSalesByInvoice = "fn_report_sales_by_invoice";
+        public const string ReportSalesUnpaid = "fn_report_sales_unpaid";
+        public const string ReportUnpaidByCustomer = "fn_report_unpaid_by_customer";
+        public const string ReportCustomerStatement = "fn_report_customer_statement";
 
         // Company, one record (Database/company_functions.sql)
         public const string GetCompany = "fn_company_get";
@@ -74,6 +77,11 @@ namespace Inventory.Repositories
         public const string GetSuppliers = "fn_supplier_get_all";
         public const string SaveSupplier = "fn_supplier_save";
         public const string DeleteSupplier = "fn_supplier_delete";
+
+        // Unpaid sales and the payments that settle them (Database/customer_payment_functions.sql)
+        public const string CustomerOpenInvoices = "fn_customer_open_invoices";
+        public const string ReceiveCustomerPayment = "fn_receive_customer_payment";
+        public const string GetCustomerPayments = "fn_customer_get_payments";
 
         // Cashier quick buttons and their groups (Database/quick_button_functions.sql)
         public const string GetQuickGroups = "fn_quick_group_get_all";

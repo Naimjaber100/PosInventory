@@ -33,6 +33,7 @@ namespace Inventory
             addButton = new Button();
             editButton = new Button();
             deleteButton = new Button();
+            payButton = new Button();
             searchText = new TextBox();
             inactiveCheck = new CheckBox();
             countLabel = new Label();
@@ -72,6 +73,7 @@ namespace Inventory
             toolPanel.Controls.Add(addButton);
             toolPanel.Controls.Add(editButton);
             toolPanel.Controls.Add(deleteButton);
+            toolPanel.Controls.Add(payButton);
             toolPanel.Controls.Add(searchText);
             toolPanel.Controls.Add(inactiveCheck);
             toolPanel.Controls.Add(countLabel);
@@ -112,6 +114,14 @@ namespace Inventory
             deleteButton.TabIndex = 2;
             deleteButton.Text = "Delete";
             deleteButton.Click += deleteButton_Click;
+            //
+            // payButton
+            //
+            payButton.Name = "payButton";
+            payButton.Size = new Size(150, 36);
+            payButton.TabIndex = 6;
+            payButton.Text = "Receive payment";
+            payButton.Click += payButton_Click;
             //
             // searchText
             //
@@ -188,6 +198,7 @@ namespace Inventory
         private Button addButton;
         private Button editButton;
         private Button deleteButton;
+        private Button payButton;
         private TextBox searchText;
         private CheckBox inactiveCheck;
         private Label countLabel;

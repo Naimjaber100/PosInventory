@@ -1,5 +1,6 @@
 C:\Projects\Inventory\Inventory\bin\Release\net10.0-windows\publish\Inventory.exe
 C:\Projects\Inventory\Inventory\bin\Release\net10.0-windows\publish\appsettings.json
+C:\Projects\Inventory\Inventory\bin\Release\net10.0-windows\publish\appsettings.local.json
 C:\Projects\Inventory\Inventory\bin\Release\net10.0-windows\publish\Inventory.dll
 C:\Projects\Inventory\Inventory\bin\Release\net10.0-windows\publish\Inventory.deps.json
 C:\Projects\Inventory\Inventory\bin\Release\net10.0-windows\publish\Inventory.runtimeconfig.json

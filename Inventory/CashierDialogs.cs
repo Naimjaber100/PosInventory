@@ -197,6 +197,176 @@ namespace Inventory
             return dialog.ShowDialog(owner) == DialogResult.OK ? choice : null;
         }
 
+        /// <summary>
+        /// Who takes an unpaid (on account) sale: an existing client from the list, or a new one (name and phone required).
+        /// Returns the client (CustomerId 0 = new, not saved yet), or null when cancelled.
+        /// </summary>
+        public static async Task<CustomerModel?> ChooseCustomerAsync(IWin32Window owner, decimal total, CurrencySet currencies)
+        {
+            const int WalkInId = 1;   // the walk-in customer: never on account
+            List<CustomerModel> all;
+            try
+            {
+                all = (await new CustomerRepository().GetAllAsync()).Where(c => c.CustomerId != WalkInId).ToList();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(owner, "Could not load the customers:\n" + ex.Message, "Unpaid sale", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return null;
+            }
+
+            using var dialog = NewDialog("Unpaid sale", new Size(520, 590));
+            dialog.BackColor = Color.White;
+
+            var header = new Panel { Dock = DockStyle.Top, Height = 84, BackColor = Dark, Padding = new Padding(20, 12, 20, 8) };
+            header.Controls.Add(new Label
+            {
+                Text = "Choose the customer, or type the name and phone of a new one.",
+                Dock = DockStyle.Fill,
+                ForeColor = Color.Gainsboro,
+                Font = new Font("Segoe UI", 10.5F),
+            });
+            header.Controls.Add(new Label
+            {
+                Text = $"Unpaid  ·  {currencies.FormatPrimary(total)}",
+                Dock = DockStyle.Top,
+                Height = 32,
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI Semibold", 14F, FontStyle.Bold),
+            });
+
+            var captionFont = new Font("Segoe UI Semibold", 10F, FontStyle.Bold);
+            var boxFont = new Font("Segoe UI", 14F);
+            var phoneCaption = new Label { Text = "Phone", Location = new Point(24, 98), AutoSize = true, Font = captionFont, ForeColor = Color.DimGray };
+            var phone = new TextBox { Location = new Point(24, 120), Width = 200, Font = boxFont, MaxLength = 30 };
+            var nameCaption = new Label { Text = "Name", Location = new Point(236, 98), AutoSize = true, Font = captionFont, ForeColor = Color.DimGray };
+            var name = new TextBox { Location = new Point(236, 120), Width = 260, Font = boxFont, MaxLength = 150 };
+            var listCaption = new Label { Location = new Point(24, 166), Size = new Size(472, 22), Font = captionFont, ForeColor = Color.DimGray };
+            var list = new ListBox
+            {
+                Location = new Point(24, 190),
+                Size = new Size(472, 300),
+                Font = new Font("Segoe UI", 11.5F),
+                IntegralHeight = false,
+                ItemHeight = 30,
+                DrawMode = DrawMode.OwnerDrawFixed,
+            };
+            list.DrawItem += (_, e) =>
+            {
+                if (e.Index < 0) return;
+                var c = (CustomerModel)list.Items[e.Index];
+                e.DrawBackground();
+                var color = (e.State & DrawItemState.Selected) != 0 ? SystemColors.HighlightText : Dark;
+                var owes = c.BalanceLbp > 0 ? $"owes {currencies.FormatPrimary(c.BalanceLbp)}" : string.Empty;
+                var flags = TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix;
+                TextRenderer.DrawText(e.Graphics, $"{c.Name}   ·   {c.Phone}", e.Font, new Rectangle(e.Bounds.X + 6, e.Bounds.Y, e.Bounds.Width - 190, e.Bounds.Height), color, flags);
+                TextRenderer.DrawText(e.Graphics, owes, e.Font, new Rectangle(e.Bounds.Right - 184, e.Bounds.Y, 178, e.Bounds.Height), color, flags | TextFormatFlags.Right);
+            };
+
+            var ok = new Button
+            {
+                Text = "Continue",
+                Location = new Point(24, 506),
+                Size = new Size(338, 64),
+                Font = new Font("Segoe UI Semibold", 15F, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(34, 139, 117),
+                ForeColor = Color.White,
+                UseVisualStyleBackColor = false,
+            };
+            ok.FlatAppearance.BorderSize = 0;
+            var cancel = new Button
+            {
+                Text = "Cancel",
+                DialogResult = DialogResult.Cancel,
+                Location = new Point(370, 506),
+                Size = new Size(126, 64),
+                Font = new Font("Segoe UI Semibold", 13F, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(244, 246, 248),
+                ForeColor = Dark,
+                UseVisualStyleBackColor = false,
+            };
+            cancel.FlatAppearance.BorderColor = Color.Silver;
+
+            static string Digits(string? text) => new((text ?? string.Empty).Where(char.IsDigit).ToArray());
+
+            CustomerModel? chosen = null;   // the existing client picked from the list
+            CustomerModel? result = null;
+            var filling = false;
+
+            // The list follows what is typed: every client whose phone and name contain it
+            void Filter()
+            {
+                var digits = Digits(phone.Text);
+                var words = name.Text.Trim();
+                var matches = all.Where(c => (digits.Length == 0 || Digits(c.Phone).Contains(digits))
+                                             && (words.Length == 0 || c.Name.Contains(words, StringComparison.CurrentCultureIgnoreCase)))
+                    .Take(100).ToArray();
+                list.BeginUpdate();
+                list.Items.Clear();
+                list.Items.AddRange(matches);
+                list.EndUpdate();
+                listCaption.Text = matches.Length > 0 ? "Existing customers (tap to choose)"
+                    : all.Count == 0 ? "No customers yet: type the phone and the name."
+                    : "Not found: a new customer is added with this phone and name.";
+            }
+
+            void Typed(object? sender, EventArgs e)
+            {
+                if (filling) return;
+                chosen = null;
+                Filter();
+            }
+            phone.TextChanged += Typed;
+            name.TextChanged += Typed;
+
+            list.SelectedIndexChanged += (_, _) =>
+            {
+                if (list.SelectedItem is not CustomerModel c) return;
+                chosen = c;
+                filling = true;
+                phone.Text = c.Phone ?? string.Empty;
+                name.Text = c.Name;
+                filling = false;
+            };
+
+            ok.Click += (_, _) =>
+            {
+                if (chosen == null)
+                {
+                    var newName = name.Text.Trim();
+                    var digits = Digits(phone.Text);
+                    if (newName.Length == 0 || digits.Length < 6)
+                    {
+                        MessageBox.Show(dialog, "A new customer needs a name and a phone number.\nOr choose an existing customer from the list.",
+                            "Unpaid sale", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        (digits.Length < 6 ? phone : name).Focus();
+                        return;
+                    }
+                    // The same phone again is the same client, not a second one
+                    chosen = all.FirstOrDefault(c => Digits(c.Phone) == digits);
+                    if (chosen != null && MessageBox.Show(dialog, $"This phone is already the customer \"{chosen.Name}\".\nPut the sale on their account?",
+                            "Unpaid sale", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+                    {
+                        chosen = null;
+                        return;
+                    }
+                    chosen ??= new CustomerModel { Name = newName, Phone = phone.Text.Trim() };
+                }
+                result = chosen;
+                dialog.DialogResult = DialogResult.OK;
+            };
+
+            dialog.Controls.AddRange(new Control[] { phoneCaption, phone, nameCaption, name, listCaption, list, ok, cancel, header });
+            dialog.AcceptButton = ok;      // Enter
+            dialog.CancelButton = cancel;  // Esc
+            dialog.Shown += (_, _) => phone.Focus();
+            Filter();
+
+            return dialog.ShowDialog(owner) == DialogResult.OK ? result : null;
+        }
+
         private static Form NewDialog(string title, Size size) => new()
         {
             Text = title,

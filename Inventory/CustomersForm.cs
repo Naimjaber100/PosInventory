@@ -124,6 +124,20 @@ namespace Inventory
             }
         }
 
+        // Receive payment: the selected client pays (part of) what they owe; their oldest unpaid invoices are settled first
+        private async void payButton_Click(object? sender, EventArgs e)
+        {
+            if (Selected is not { } customer) return;
+            if (customer.BalanceLbp <= 0)
+            {
+                MessageBox.Show(this, $"\"{customer.Name}\" owes nothing.", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            using var form = new CustomerPaymentForm(_currencies, customer);
+            form.ShowDialog(this);
+            if (form.Received) await LoadAsync(customer.CustomerId);
+        }
+
         private void closeButton_Click(object? sender, EventArgs e) => Close();
 
         private void CustomersForm_KeyDown(object? sender, KeyEventArgs e)

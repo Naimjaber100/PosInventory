@@ -95,6 +95,15 @@ namespace Inventory
         // Reports > Sales > Sales by invoice (profit)
         private void salesByInvoiceReportToolStripMenuItem_Click(object sender, EventArgs e) => OpenReport(new Reports.SalesByInvoiceReport());
 
+        // Reports > Sales > Sales and unpaid
+        private void salesUnpaidReportToolStripMenuItem_Click(object sender, EventArgs e) => OpenReport(new Reports.SalesUnpaidReport());
+
+        // Reports > Sales > Unpaid by client
+        private void unpaidByCustomerReportToolStripMenuItem_Click(object sender, EventArgs e) => OpenReport(new Reports.UnpaidByCustomerReport());
+
+        // Reports > Sales > Client statement
+        private void customerStatementReportToolStripMenuItem_Click(object sender, EventArgs e) => OpenReport(new Reports.CustomerStatementReport());
+
         // Each report opens in the shared report screen (several reports can be open at once)
         private void OpenReport(Reports.ReportDefinition report)
         {

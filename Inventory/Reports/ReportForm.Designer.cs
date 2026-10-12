@@ -47,6 +47,8 @@
             toPicker = new DateTimePicker();
             userCaption = new Label();
             userCombo = new ComboBox();
+            customerCaption = new Label();
+            customerCombo = new ComboBox();
             refreshButton = new Button();
             excelButton = new Button();
             cardsPanel = new FlowLayoutPanel();
@@ -116,6 +118,8 @@
             filterPanel.Controls.Add(toPicker);
             filterPanel.Controls.Add(userCaption);
             filterPanel.Controls.Add(userCombo);
+            filterPanel.Controls.Add(customerCaption);
+            filterPanel.Controls.Add(customerCombo);
             filterPanel.Dock = DockStyle.Top;
             filterPanel.Name = "filterPanel";
             filterPanel.Padding = new Padding(14, 9, 10, 4);
@@ -227,6 +231,25 @@
             userCombo.Size = new Size(170, 28);
             userCombo.TabIndex = 11;
             userCombo.SelectedIndexChanged += userCombo_SelectedIndexChanged;
+            //
+            // customerCaption
+            //
+            customerCaption.AutoSize = true;
+            customerCaption.Margin = new Padding(18, 9, 3, 0);
+            customerCaption.Name = "customerCaption";
+            customerCaption.TabIndex = 13;
+            customerCaption.Text = "Client";
+            customerCaption.Visible = false;
+            //
+            // customerCombo
+            //
+            customerCombo.DropDownStyle = ComboBoxStyle.DropDownList;
+            customerCombo.Margin = new Padding(3, 5, 3, 3);
+            customerCombo.Name = "customerCombo";
+            customerCombo.Size = new Size(230, 28);
+            customerCombo.TabIndex = 14;
+            customerCombo.Visible = false;
+            customerCombo.SelectedIndexChanged += customerCombo_SelectedIndexChanged;
             //
             // refreshButton
             //
@@ -383,6 +406,8 @@
         private DateTimePicker toPicker;
         private Label userCaption;
         private ComboBox userCombo;
+        private Label customerCaption;
+        private ComboBox customerCombo;
         private Button refreshButton;
         private Button excelButton;
         private FlowLayoutPanel cardsPanel;

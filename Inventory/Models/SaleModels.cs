@@ -6,7 +6,7 @@ namespace Inventory.Models
     {
         public const short Cash = 1;
         public const short Card = 2;
-        public const short OnAccount = 3;   // needs a customer (not on the cashier screen yet)
+        public const short OnAccount = 3;   // needs a customer: the cashier's Unpaid (F3)
     }
 
     // One payment line sent to fn_save_sale (amount in its own currency: "LBP" or "USD")
@@ -56,10 +56,23 @@ namespace Inventory.Models
         private DateTime _invoiceDate;
 
         [DisplayName("Cashier")] public string? Cashier { get; set; }
+        [DisplayName("Customer")] public string? Customer { get; set; }
         [DisplayName("Items")] public long ItemCount { get; set; }
         [DisplayName("Total")] public decimal Total { get; set; }
         [DisplayName("Profit")] public decimal Profit { get; set; }
         [DisplayName("Paid / refunded")] public string? Payments { get; set; }
+
+        [Browsable(false)] public decimal OnAccountLbp { get; set; }   // left unpaid at the sale (0 = paid at once)
+        [Browsable(false)] public decimal DueLbp { get; set; }         // still unpaid of it now
+        [Browsable(false)] public bool IsUnpaid => DueLbp > 0;
+
+        /// <summary>Unpaid / Partly paid / Paid for a sale on account; empty for a sale paid at once.</summary>
+        [DisplayName("Status")]
+        public string PayStatus =>
+            OnAccountLbp <= 0 ? string.Empty
+            : DueLbp <= 0 ? "Paid"
+            : DueLbp >= OnAccountLbp ? "Unpaid"
+            : $"Partly paid ({DueLbp:#,0} left)";
 
         [Browsable(false)] public bool IsReturn => InvoiceType == ReturnType;
 

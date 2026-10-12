@@ -42,3 +42,6 @@ C:\Projects\Inventory\Inventory\obj\Release\net10.0-windows\Inventory.CompanyFor
 C:\Projects\Inventory\Inventory\obj\Release\net10.0-windows\Inventory.CurrenciesForm.resources
 C:\Projects\Inventory\Inventory\obj\Release\net10.0-windows\Inventory.SalesHistoryForm.resources
 C:\Projects\Inventory\Inventory\obj\Release\net10.0-windows\Inventory.sourcelink.json
+C:\Projects\Inventory\Inventory\bin\Release\net10.0-windows\appsettings.local.json
+C:\Projects\Inventory\Inventory\obj\Release\net10.0-windows\Inventory.AiPurchaseImportForm.resources
+C:\Projects\Inventory\Inventory\obj\Release\net10.0-windows\Inventory.ReceiptPrinterForm.resources

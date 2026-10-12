@@ -113,5 +113,10 @@ namespace Inventory
 
         internal static bool IsEmail(string text) =>
             MailAddress.TryCreate(text, out var address) && address.Address == text && text.Contains('.', StringComparison.Ordinal);
+
+        private void addressText_TextChanged(object sender, EventArgs e)
+        {
+
+        }
     }
 }

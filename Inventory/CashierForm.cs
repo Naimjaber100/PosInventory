@@ -16,7 +16,9 @@ namespace Inventory
     //
     // Return (F4): the screen turns red, the scanned items come back, REFUND (F12) saves a return invoice (R-...).
     //
-    // Keys: F1 barcode box, F2 qty, F4 return, F5 line discount, F6 invoice discount, F7 sales list, F8 hold, F9 recall,
+    // Unpaid (F3): the sale goes on a customer's account (existing, or new with name and phone); a manager approves it.
+    //
+    // Keys: F1 barcode box, F2 qty, F3 unpaid sale, F4 return, F5 line discount, F6 invoice discount, F7 sales list, F8 hold, F9 recall,
     //       F10 void sale, F12 pay, +/- quantity, Del delete line, Up/Down choose line, Esc clear box.
     public partial class CashierForm : Form
     {
@@ -37,8 +39,9 @@ namespace Inventory
         private TextBox _entry;            // where the keypad types (barcode box or discount box)
         private bool _returnMode;          // Return (F4): the scanned items come back and are refunded
         private UserModel? _returnApprover;  // the Manager who opened the return (password asked at Return)
-        private Button _payButton = null!, _quickCashButton = null!, _returnButton = null!, _holdButton = null!, _recallButton = null!;
+        private Button _payButton = null!, _quickCashButton = null!, _unpaidButton = null!, _returnButton = null!, _holdButton = null!, _recallButton = null!;
         private static readonly Color ReturnRed = Color.FromArgb(192, 57, 43);
+        private static readonly Color UnpaidOrange = Color.FromArgb(214, 126, 28);
 
         public CashierForm()
         {
@@ -192,6 +195,23 @@ namespace Inventory
             salesButton.Click += (_, _) => ShowSales();
             topBar.Controls.Add(salesButton);
 
+            // Customer pays (top bar): a customer pays for unpaid sales; the oldest invoices are settled first
+            var customerPayButton = new Button
+            {
+                Text = "Customer pays",
+                Dock = DockStyle.Right,
+                Width = 140,
+                Font = new Font("Segoe UI Semibold", 10F, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                ForeColor = Color.White,
+                BackColor = UnpaidOrange,
+                TabStop = false,
+                UseVisualStyleBackColor = false,
+            };
+            customerPayButton.FlatAppearance.BorderSize = 0;
+            customerPayButton.Click += (_, _) => ReceiveCustomerPayment();
+            topBar.Controls.Add(customerPayButton);
+
             // Reprint (top bar, Ctrl+P): the receipt of the last sale or return again
             var reprintButton = new Button
             {
@@ -233,12 +253,18 @@ namespace Inventory
             _quickCashButton.FlatAppearance.BorderSize = 0;
             actionsTable.Controls.Add(_quickCashButton, 0, 1);
 
-            _payButton = MakeButton("PAY  (F12)", 22F, async (_, _) => await PayOrRefundAsync());
+            // Unpaid (F3): the whole sale on a customer's account, with a manager's approval
+            _unpaidButton = MakeButton("UNPAID\n(F3)", 15F, async (_, _) => await UnpaidAsync());
+            _unpaidButton.BackColor = UnpaidOrange;
+            _unpaidButton.ForeColor = Color.White;
+            _unpaidButton.FlatAppearance.BorderSize = 0;
+            actionsTable.Controls.Add(_unpaidButton, 1, 1);
+
+            _payButton = MakeButton("PAY\n(F12)", 20F, async (_, _) => await PayOrRefundAsync());
             _payButton.BackColor = Accent;
             _payButton.ForeColor = Color.White;
             _payButton.FlatAppearance.BorderSize = 0;
-            actionsTable.Controls.Add(_payButton, 1, 1);
-            actionsTable.SetColumnSpan(_payButton, 2);
+            actionsTable.Controls.Add(_payButton, 2, 1);
         }
 
         private static Button MakeButton(string text, float fontSize, EventHandler onClick)
@@ -436,6 +462,7 @@ namespace Inventory
                 case Keys.Control | Keys.P: ReprintLast(); return true;
                 case Keys.F1: FocusScan(); return true;
                 case Keys.F2: SetQuantity(); return true;
+                case Keys.F3: _ = UnpaidAsync(); return true;
                 case Keys.F4: ToggleReturnMode(); return true;
                 case Keys.F5: SetLineDiscount(); return true;
                 case Keys.F6: if (!_returnMode) { discountBox.Focus(); discountBox.SelectAll(); } return true;
@@ -846,20 +873,79 @@ namespace Inventory
             await SaveSaleAsync(new[] { cash }, discount);
         }
 
+        // Unpaid (F3): nothing is paid now, the whole total goes on a customer's account (what they owe us).
+        // Needs the customer (an existing one, or a new one with name and phone) and a Manager's password
+        // (a logged-in Manager goes straight on).
+        private async Task UnpaidAsync()
+        {
+            if (_returnMode) { ShowStatus("Unpaid is for sales. Use REFUND (F12) for a return.", Color.Khaki); return; }
+            if (_saving || _askingUnpaid) return;
+            if (_lines.Count == 0) { ShowStatus("Scan the items first.", Color.Khaki); return; }
+            if (!ValidateSale(out var discount)) return;
+            var total = SubTotal - discount;
+            if (total <= 0) { ShowStatus("There is nothing to leave unpaid.", Color.Khaki); return; }
+
+            try
+            {
+                _askingUnpaid = true;
+                var customer = await CashierDialogs.ChooseCustomerAsync(this, total, _currencies);
+                if (customer == null) { FocusScan(); return; }
+
+                var approver = AppSession.IsManager
+                    ? AppSession.CurrentUser
+                    : await CashierDialogs.AskManagerApprovalAsync(this,
+                        $"Unpaid sale of {_currencies.FormatPrimary(total)} for {customer.Name}. Only a manager can allow it.");
+                if (approver == null)
+                {
+                    ShowStatus("Unpaid sale not allowed without a manager password.", Color.Salmon);
+                    FocusScan();
+                    return;
+                }
+
+                var onAccount = new SalePaymentModel { Method = PaymentMethod.OnAccount, Currency = _currencies.Primary.Code, Amount = total };
+                await SaveSaleAsync(new[] { onAccount }, discount, customer, approver);
+            }
+            finally
+            {
+                _askingUnpaid = false;
+            }
+        }
+
+        private bool _askingUnpaid;   // the customer / manager windows of Unpaid are open
         private bool _saving;   // stops a double press of F11 / F12 from saving the same sale twice
 
-        private async Task SaveSaleAsync(IEnumerable<SalePaymentModel> payments, decimal discount)
+        // customer + approver: an unpaid sale (the payments are on account)
+        private async Task SaveSaleAsync(IEnumerable<SalePaymentModel> payments, decimal discount,
+            CustomerModel? customer = null, UserModel? approver = null)
         {
             if (_saving) return;
             try
             {
                 _saving = true;
                 UseWaitCursor = true;
-                var result = await _saleRepository.SaveSaleAsync(_lines, payments, discount, _heldSaleId, AppConfig.CurrentUserId);
+                if (customer is { CustomerId: 0 })   // new: added only now, after the manager approved
+                    customer.CustomerId = await new CustomerRepository().SaveAsync(customer);
+                var result = await _saleRepository.SaveSaleAsync(_lines, payments, discount, _heldSaleId, AppConfig.CurrentUserId, customer?.CustomerId);
                 PrintReceipt(result.SaleId);
+                if (customer != null && approver != null)
+                {
+                    try
+                    {
+                        await _saleRepository.AddAuditAsync("unpaid_sale_approved", "sales_invoices", result.SaleId,
+                            new { ApprovedBy = approver.UserId, ApprovedByName = approver.FullName, result.InvoiceNo, result.TotalLbp,
+                                  customer.CustomerId, CustomerName = customer.Name });
+                    }
+                    catch { /* the sale is saved; the approval note is extra */ }
+                }
                 ClearSale();
 
                 lastItemName.Text = $"Invoice {result.InvoiceNo}";
+                if (customer != null)
+                {
+                    lastItemPrice.Text = $"Unpaid  {result.TotalLbp:#,0}";
+                    ShowStatus($"{customer.Name} owes {_currencies.FormatPrimary(result.TotalLbp)} for this sale  ·  next customer", Color.FromArgb(120, 220, 190));
+                    return;
+                }
                 lastItemPrice.Text = $"Change  {result.ChangeLbp:#,0}";
                 var changeSecond = result.ChangeLbp > 0 ? _currencies.FormatSecond(result.ChangeLbp) : string.Empty;
                 ShowStatus($"Total {_currencies.FormatPrimary(result.TotalLbp)}"
@@ -869,7 +955,8 @@ namespace Inventory
             catch (Exception ex)
             {
                 // Nothing was saved (fn_save_sale is all or nothing); the sale stays on the screen
-                MessageBox.Show(this, "The sale was not saved:\n" + ex.Message, "Pay", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(this, "The sale was not saved:\n" + (ex is Npgsql.PostgresException pg ? pg.MessageText : ex.Message),
+                    customer != null ? "Unpaid sale" : "Pay", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally
             {
@@ -964,6 +1051,15 @@ namespace Inventory
             FocusScan();
         }
 
+        // Customer pays: money for earlier unpaid sales (Unpaid F3); the sale on the screen stays
+        private void ReceiveCustomerPayment()
+        {
+            using var form = new CustomerPaymentForm(_currencies);
+            form.ShowDialog(this);
+            if (form.Received) ShowStatus("Customer payment received.", Color.FromArgb(120, 220, 190));
+            FocusScan();
+        }
+
         private Task PayOrRefundAsync() => _returnMode ? RefundAsync() : PayAsync();
 
         // Return (F4): only with a Manager's password (a logged-in Manager goes straight in).
@@ -1012,12 +1108,13 @@ namespace Inventory
             var back = on ? ReturnRed : Dark;
             topBar.BackColor = back;
             lastItemPanel.BackColor = back;
-            _payButton.Text = on ? "REFUND  (F12)" : "PAY  (F12)";
+            _payButton.Text = on ? "REFUND\n(F12)" : "PAY\n(F12)";
             _payButton.BackColor = on ? ReturnRed : Accent;
             _returnButton.Text = on ? "Sale  (F4)" : "Return  (F4)";
             _returnButton.BackColor = on ? Color.FromArgb(253, 226, 222) : Color.FromArgb(244, 246, 248);
-            _holdButton.Enabled = _recallButton.Enabled = _quickCashButton.Enabled = !on;
+            _holdButton.Enabled = _recallButton.Enabled = _quickCashButton.Enabled = _unpaidButton.Enabled = !on;
             _quickCashButton.BackColor = on ? Color.FromArgb(200, 205, 210) : Color.FromArgb(46, 125, 50);
+            _unpaidButton.BackColor = on ? Color.FromArgb(200, 205, 210) : UnpaidOrange;
             discountBox.Clear();
             discountBox.Enabled = percentCheck.Enabled = !on;   // a return has no invoice discount
             totalCaption.Text = on ? "Refund" : "TOTAL";

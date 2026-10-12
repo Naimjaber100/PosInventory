@@ -14,14 +14,20 @@ DROP FUNCTION IF EXISTS public.fn_save_return(integer, jsonb, integer, text, int
 DROP FUNCTION IF EXISTS public.fn_sales_by_user(integer, date, date);
 DROP FUNCTION IF EXISTS public.fn_sale_get_lines(integer);
 
+-- What is still unpaid of an on-account sale (set by fn_save_sale; Database/customer_payment_functions.sql settles it)
+ALTER TABLE public.sales_invoices ADD COLUMN IF NOT EXISTS due_lbp numeric(18,2) NOT NULL DEFAULT 0;
+
 -- ---------------------------------------------------------------------------
 -- Sales screen (cashier F7): finished sales and returns between two dates (inclusive), newest first.
 -- p_user_id NULL = every cashier. Numbers are positive; invoice_type 2 = return (subtract it in totals).
 -- payments: how it was paid / refunded, e.g. "LBP 40,000 + USD 1.00".
+-- on_account_lbp: what was left unpaid at the sale; due_lbp: what is still unpaid of it now
+-- (0 = paid, equal = unpaid, between = partly paid; Database/customer_payment_functions.sql).
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.fn_sales_by_user(p_user_id integer, p_from date, p_to date)
 RETURNS TABLE (sale_id integer, invoice_no varchar, invoice_type smallint, invoice_date timestamptz, cashier varchar,
-               item_count bigint, total numeric, profit numeric, payments text)
+               item_count bigint, total numeric, profit numeric, payments text,
+               customer varchar, on_account_lbp numeric, due_lbp numeric)
 LANGUAGE sql STABLE
 AS $$
     SELECT si.sale_id, si.invoice_no, si.invoice_type, si.invoice_date, u.full_name,
@@ -29,9 +35,13 @@ AS $$
            si.total, si.profit,
            (SELECT string_agg(trim(p.currency) || ' ' || to_char(p.amount, 'FM999,999,999,990.##')
                               || CASE p.method WHEN 2 THEN ' card' WHEN 3 THEN ' account' ELSE '' END, ' + ' ORDER BY p.payment_id)
-            FROM sales_payments p WHERE p.sale_id = si.sale_id)
+            FROM sales_payments p WHERE p.sale_id = si.sale_id),
+           CASE WHEN cu.customer_id <> 1 THEN cu.name END,   -- 1 = walk-in customer
+           coalesce((SELECT sum(p.amount_lbp) FROM sales_payments p WHERE p.sale_id = si.sale_id AND p.method = 3), 0),
+           si.due_lbp
     FROM sales_invoices si
     LEFT JOIN users u ON u.user_id = si.user_id
+    LEFT JOIN customers cu ON cu.customer_id = si.customer_id
     WHERE si.status = 1
       AND (p_user_id IS NULL OR si.user_id = p_user_id)
       AND si.invoice_date >= p_from::timestamptz
@@ -447,9 +457,10 @@ BEGIN
     v_no := fn_next_doc_no('S');
 
     INSERT INTO sales_invoices (invoice_no, invoice_type, customer_id, shift_id, user_id, exchange_rate,
-                                sub_total, discount, total, total_cost, profit, change_lbp, status)
+                                sub_total, discount, total, total_cost, profit, change_lbp, status, due_lbp)
     VALUES (v_no, 1, p_customer_id, p_shift_id, p_user_id, v_rate,
-            v_sub, v_disc, v_total, v_cost, v_total - v_cost, v_change, 1)
+            v_sub, v_disc, v_total, v_cost, v_total - v_cost, v_change, 1,
+            v_on_account)   -- unpaid until the client pays (Database/customer_payment_functions.sql)
     RETURNING sale_id INTO v_sale_id;
 
     INSERT INTO sales_lines (sale_id, line_no, product_id, packaging_id, description, quantity, factor,

@@ -59,13 +59,15 @@ namespace Inventory.Repositories
 
         /// <summary>
         /// Saves and finishes a sale: stock out, payments, change. heldSaleId = the recalled held sale it replaces.
+        /// customerId = the client of an on-account (unpaid) payment: that amount is added to what they owe.
         /// All or nothing.
         /// </summary>
         public async Task<SaleResultModel> SaveSaleAsync(IEnumerable<PosLine> lines, IEnumerable<SalePaymentModel> payments,
-            decimal invoiceDiscount, int? heldSaleId, int userId)
+            decimal invoiceDiscount, int? heldSaleId, int userId, int? customerId = null)
         {
             var parameters = new DynamicParameters();
             parameters.Add("p_user_id", userId);
+            parameters.Add("p_customer_id", customerId, DbType.Int32);
             parameters.Add("p_lines", new JsonbParameter(ToJsonLines(lines)));
             parameters.Add("p_payments", new JsonbParameter(payments.Where(p => p.Amount > 0)));
             parameters.Add("p_invoice_discount", invoiceDiscount);

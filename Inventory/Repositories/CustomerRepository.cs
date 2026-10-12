@@ -35,6 +35,40 @@ namespace Inventory.Repositories
             return await GetSingleAsync<int>(Procedures.SaveCustomer, parameters);
         }
 
+        /// <summary>The unpaid and partly paid invoices of a client, oldest first (the order payments settle them).</summary>
+        public async Task<IEnumerable<CustomerOpenInvoiceModel>> GetOpenInvoicesAsync(int customerId)
+        {
+            var parameters = new DynamicParameters();
+            parameters.Add("p_customer_id", customerId);
+
+            return await GetListAsync<CustomerOpenInvoiceModel>(Procedures.CustomerOpenInvoices, parameters);
+        }
+
+        /// <summary>
+        /// A client pays (part of) what they owe: the money settles their invoices oldest first.
+        /// method: PaymentMethod.Cash or Card. More than they owe is refused. All or nothing.
+        /// </summary>
+        public async Task<CustomerPaymentResultModel> ReceivePaymentAsync(int customerId, decimal amount, string currency, short method, int userId)
+        {
+            var parameters = new DynamicParameters();
+            parameters.Add("p_customer_id", customerId);
+            parameters.Add("p_amount", amount);
+            parameters.Add("p_currency", currency);
+            parameters.Add("p_method", (int)method);
+            parameters.Add("p_user_id", userId);
+
+            return (await GetSingleAsync<CustomerPaymentResultModel>(Procedures.ReceiveCustomerPayment, parameters))!;
+        }
+
+        /// <summary>The payments of a client, newest first.</summary>
+        public async Task<IEnumerable<CustomerPaymentModel>> GetPaymentsAsync(int customerId)
+        {
+            var parameters = new DynamicParameters();
+            parameters.Add("p_customer_id", customerId);
+
+            return await GetListAsync<CustomerPaymentModel>(Procedures.GetCustomerPayments, parameters);
+        }
+
         /// <summary>Deletes a client; one with sales or payments is deactivated instead. Returns true when deleted.</summary>
         public async Task<bool> DeleteAsync(int customerId)
         {

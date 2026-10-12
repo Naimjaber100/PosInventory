@@ -48,6 +48,9 @@
             dailySalesReportToolStripMenuItem = new ToolStripMenuItem();
             salesByItemReportToolStripMenuItem = new ToolStripMenuItem();
             salesByInvoiceReportToolStripMenuItem = new ToolStripMenuItem();
+            salesUnpaidReportToolStripMenuItem = new ToolStripMenuItem();
+            unpaidByCustomerReportToolStripMenuItem = new ToolStripMenuItem();
+            customerStatementReportToolStripMenuItem = new ToolStripMenuItem();
             cashierToolStripMenuItem = new ToolStripMenuItem();
             menuStrip1.SuspendLayout();
             SuspendLayout();
@@ -167,7 +170,7 @@
             //
             // salesReportsToolStripMenuItem
             //
-            salesReportsToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { dailySalesReportToolStripMenuItem, salesByInvoiceReportToolStripMenuItem, salesByItemReportToolStripMenuItem });
+            salesReportsToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { dailySalesReportToolStripMenuItem, salesByInvoiceReportToolStripMenuItem, salesByItemReportToolStripMenuItem, salesUnpaidReportToolStripMenuItem, unpaidByCustomerReportToolStripMenuItem, customerStatementReportToolStripMenuItem });
             salesReportsToolStripMenuItem.Name = "salesReportsToolStripMenuItem";
             salesReportsToolStripMenuItem.Size = new Size(240, 26);
             salesReportsToolStripMenuItem.Text = "Sales";
@@ -192,6 +195,27 @@
             salesByInvoiceReportToolStripMenuItem.Size = new Size(240, 26);
             salesByInvoiceReportToolStripMenuItem.Text = "Sales by invoice (profit)";
             salesByInvoiceReportToolStripMenuItem.Click += salesByInvoiceReportToolStripMenuItem_Click;
+            //
+            // salesUnpaidReportToolStripMenuItem
+            //
+            salesUnpaidReportToolStripMenuItem.Name = "salesUnpaidReportToolStripMenuItem";
+            salesUnpaidReportToolStripMenuItem.Size = new Size(240, 26);
+            salesUnpaidReportToolStripMenuItem.Text = "Sales and unpaid";
+            salesUnpaidReportToolStripMenuItem.Click += salesUnpaidReportToolStripMenuItem_Click;
+            //
+            // unpaidByCustomerReportToolStripMenuItem
+            //
+            unpaidByCustomerReportToolStripMenuItem.Name = "unpaidByCustomerReportToolStripMenuItem";
+            unpaidByCustomerReportToolStripMenuItem.Size = new Size(240, 26);
+            unpaidByCustomerReportToolStripMenuItem.Text = "Unpaid by client";
+            unpaidByCustomerReportToolStripMenuItem.Click += unpaidByCustomerReportToolStripMenuItem_Click;
+            //
+            // customerStatementReportToolStripMenuItem
+            //
+            customerStatementReportToolStripMenuItem.Name = "customerStatementReportToolStripMenuItem";
+            customerStatementReportToolStripMenuItem.Size = new Size(240, 26);
+            customerStatementReportToolStripMenuItem.Text = "Client statement";
+            customerStatementReportToolStripMenuItem.Click += customerStatementReportToolStripMenuItem_Click;
             // 
             // cashierToolStripMenuItem
             // 
@@ -238,6 +262,9 @@
         private ToolStripMenuItem dailySalesReportToolStripMenuItem;
         private ToolStripMenuItem salesByItemReportToolStripMenuItem;
         private ToolStripMenuItem salesByInvoiceReportToolStripMenuItem;
+        private ToolStripMenuItem salesUnpaidReportToolStripMenuItem;
+        private ToolStripMenuItem unpaidByCustomerReportToolStripMenuItem;
+        private ToolStripMenuItem customerStatementReportToolStripMenuItem;
         private ToolStripMenuItem cashierToolStripMenuItem;
     }
 }

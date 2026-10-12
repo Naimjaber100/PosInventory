@@ -132,3 +132,139 @@ namespace Inventory.Models
         };
     }
 }
+
+namespace Inventory.Models
+{
+    // Report 4 - Sales and unpaid: one row of fn_report_sales_unpaid (amounts in the primary currency).
+    // Unpaid is what is still unpaid now of the invoices of that day. The report adds a TOTAL row at the end (IsTotal).
+    public class SalesUnpaidRow
+    {
+        [Browsable(false)] public DateTime Day { get; set; }
+        [Browsable(false)] public bool IsTotal { get; set; }
+
+        [DisplayName("Day")] public string DayText => IsTotal ? "TOTAL" : Day.ToString("ddd dd/MM/yyyy");
+        [DisplayName("Sales #")] public long SaleCount { get; set; }
+        [DisplayName("Sales")] public decimal Sales { get; set; }
+        [DisplayName("Returns")] public decimal Returns { get; set; }
+        [DisplayName("Net sales")] public decimal NetSales { get; set; }
+        [DisplayName("Sold unpaid")] public decimal OnAccount { get; set; }
+        [DisplayName("Paid later")] public decimal PaidLater => OnAccount - Unpaid;
+        [DisplayName("Unpaid #")] public long UnpaidCount { get; set; }
+        [DisplayName("Still unpaid")] public decimal Unpaid { get; set; }
+        [DisplayName("Difference (collected)")] public decimal Collected => NetSales - Unpaid;
+        [DisplayName("Unpaid %")] public decimal? UnpaidShare => NetSales > 0 ? Math.Round(Unpaid / NetSales * 100, 1) : null;
+
+        [Browsable(false)] public bool IsEmpty => !IsTotal && SaleCount == 0 && Returns == 0;
+
+        /// <summary>The TOTAL row of a list of days.</summary>
+        public static SalesUnpaidRow Total(IReadOnlyCollection<SalesUnpaidRow> days) => new()
+        {
+            IsTotal = true,
+            SaleCount = days.Sum(d => d.SaleCount),
+            Sales = days.Sum(d => d.Sales),
+            Returns = days.Sum(d => d.Returns),
+            NetSales = days.Sum(d => d.NetSales),
+            OnAccount = days.Sum(d => d.OnAccount),
+            UnpaidCount = days.Sum(d => d.UnpaidCount),
+            Unpaid = days.Sum(d => d.Unpaid),
+        };
+    }
+}
+
+namespace Inventory.Models
+{
+    // Report 5 - Unpaid by client: one row of fn_report_unpaid_by_customer (amounts in the primary currency),
+    // as it is now. The report adds a TOTAL row at the end (IsTotal).
+    public class UnpaidByCustomerRow
+    {
+        [Browsable(false)] public int CustomerId { get; set; }
+        [Browsable(false)] public bool IsTotal { get; set; }
+
+        [DisplayName("Client")] public string Name { get; set; } = string.Empty;
+        [DisplayName("Phone")] public string? Phone { get; set; }
+        [DisplayName("Unpaid invoices")] public long InvoiceCount { get; set; }
+
+        [DisplayName("Oldest unpaid")]
+        public DateTime? OldestUnpaid
+        {
+            get => _oldestUnpaid;
+            set => _oldestUnpaid = value is { Kind: DateTimeKind.Utc } utc ? utc.ToLocalTime() : value;
+        }
+        private DateTime? _oldestUnpaid;
+
+        [DisplayName("Days")] public long? Days => OldestUnpaid is { } d ? (long)(DateTime.Today - d.Date).TotalDays : null;
+        [DisplayName("Unpaid")] public decimal Unpaid { get; set; }
+        [DisplayName("% of total")] public decimal? Share { get; set; }   // filled by the report
+        [DisplayName("Credit limit")] public decimal? CreditLimitLbp { get; set; }
+
+        [DisplayName("Last payment")]
+        public DateTime? LastPayment
+        {
+            get => _lastPayment;
+            set => _lastPayment = value is { Kind: DateTimeKind.Utc } utc ? utc.ToLocalTime() : value;
+        }
+        private DateTime? _lastPayment;
+
+        [Browsable(false)] public bool OverLimit => CreditLimitLbp is { } limit && Unpaid > limit;
+
+        /// <summary>The TOTAL row of a list of clients.</summary>
+        public static UnpaidByCustomerRow Total(IReadOnlyCollection<UnpaidByCustomerRow> clients) => new()
+        {
+            IsTotal = true,
+            Name = $"TOTAL  ({clients.Count} clients)",
+            InvoiceCount = clients.Sum(c => c.InvoiceCount),
+            OldestUnpaid = clients.Min(c => c.OldestUnpaid),
+            Unpaid = clients.Sum(c => c.Unpaid),
+            Share = clients.Count > 0 ? 100 : null,
+        };
+    }
+}
+
+namespace Inventory.Models
+{
+    // Report 6 - Client statement: one row of fn_report_customer_statement (amounts in the primary currency):
+    // what was owed before the period, each sale left unpaid and each payment. The report fills the running
+    // balance and adds a TOTAL row at the end (IsTotal).
+    public class CustomerStatementRow
+    {
+        public const short OpeningType = 0;
+        public const short SaleType = 1;
+        public const short PaymentType = 2;
+
+        [Browsable(false)] public short EntryType { get; set; }
+        [Browsable(false)] public bool IsTotal { get; set; }
+        [Browsable(false)] public int? CustomerId { get; set; }
+
+        [DisplayName("Date")]
+        public DateTime? EntryDate
+        {
+            get => _entryDate;
+            set => _entryDate = value is { Kind: DateTimeKind.Utc } utc ? utc.ToLocalTime() : value;
+        }
+        private DateTime? _entryDate;
+
+        [DisplayName("Client")] public string? Customer { get; set; }
+        [DisplayName("Type")] public string TypeText => IsTotal ? string.Empty : EntryType switch { SaleType => "Unpaid sale", PaymentType => "Payment", _ => string.Empty };
+        [DisplayName("Invoice / payment")] public string Reference { get; set; } = string.Empty;
+        [DisplayName("Sold unpaid")] public decimal Debit { get; set; }
+        [DisplayName("Paid")] public decimal Credit { get; set; }
+        [DisplayName("Owes after")] public decimal Balance { get; set; }   // filled by the report
+
+        [Browsable(false)] public decimal? DueLbp { get; set; }   // a sale: what is still unpaid of it now
+
+        /// <summary>A sale: Unpaid / Partly paid / Paid as it is now.</summary>
+        [DisplayName("Invoice now")]
+        public string Status =>
+            EntryType != SaleType || IsTotal || DueLbp is not { } due ? string.Empty
+            : due <= 0 ? "Paid"
+            : due >= Debit ? "Unpaid"
+            : $"Partly paid ({due:#,0} left)";
+
+        [DisplayName("Details")] public string? Details { get; set; }
+        [DisplayName("Cashier")] public string? Cashier { get; set; }
+
+        [Browsable(false)] public bool IsSale => EntryType == SaleType && !IsTotal;
+        [Browsable(false)] public bool IsPayment => EntryType == PaymentType && !IsTotal;
+        [Browsable(false)] public bool IsOpening => EntryType == OpeningType && !IsTotal;
+    }
+}
