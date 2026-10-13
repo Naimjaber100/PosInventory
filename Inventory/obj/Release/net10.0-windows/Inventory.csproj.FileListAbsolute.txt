@@ -45,3 +45,4 @@ C:\Projects\Inventory\Inventory\obj\Release\net10.0-windows\Inventory.sourcelink
 C:\Projects\Inventory\Inventory\bin\Release\net10.0-windows\appsettings.local.json
 C:\Projects\Inventory\Inventory\obj\Release\net10.0-windows\Inventory.AiPurchaseImportForm.resources
 C:\Projects\Inventory\Inventory\obj\Release\net10.0-windows\Inventory.ReceiptPrinterForm.resources
+C:\Projects\Inventory\Inventory\obj\Release\net10.0-windows\Inventory.CustomerEditForm.resources

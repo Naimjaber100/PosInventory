@@ -51,6 +51,7 @@
             customerCombo = new ComboBox();
             refreshButton = new Button();
             excelButton = new Button();
+            printButton = new Button();
             cardsPanel = new FlowLayoutPanel();
             filterLabel = new Label();
             grid = new DataGridView();
@@ -78,12 +79,13 @@
             // headerButtons
             //
             headerButtons.Controls.Add(excelButton);
+            headerButtons.Controls.Add(printButton);
             headerButtons.Controls.Add(refreshButton);
             headerButtons.Dock = DockStyle.Right;
             headerButtons.FlowDirection = FlowDirection.RightToLeft;
             headerButtons.Name = "headerButtons";
             headerButtons.Padding = new Padding(0, 14, 0, 0);
-            headerButtons.Size = new Size(240, 64);
+            headerButtons.Size = new Size(340, 64);
             headerButtons.TabIndex = 2;
             headerButtons.WrapContents = false;
             //
@@ -278,6 +280,19 @@
             excelButton.UseVisualStyleBackColor = false;
             excelButton.Click += excelButton_Click;
             //
+            // printButton
+            //
+            printButton.BackColor = Color.White;
+            printButton.FlatAppearance.BorderSize = 0;
+            printButton.FlatStyle = FlatStyle.Flat;
+            printButton.Margin = new Padding(0, 0, 8, 0);
+            printButton.Name = "printButton";
+            printButton.Size = new Size(92, 36);
+            printButton.TabIndex = 14;
+            printButton.Text = "Print";
+            printButton.UseVisualStyleBackColor = false;
+            printButton.Click += printButton_Click;
+            //
             // cardsPanel
             //
             cardsPanel.Dock = DockStyle.Top;
@@ -408,6 +423,7 @@
         private ComboBox userCombo;
         private Label customerCaption;
         private ComboBox customerCombo;
+        private Button printButton;
         private Button refreshButton;
         private Button excelButton;
         private FlowLayoutPanel cardsPanel;

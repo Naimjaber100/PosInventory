@@ -15,6 +15,7 @@ namespace Inventory.Reports
         private CurrencySet _currencies = CurrencySet.Default;
         private ReportFilter _filter = new();
         private bool _loading = true;
+        private List<string> _totals = new();   // the total cards as text, for Print
 
         public ReportForm(ReportDefinition report)
         {
@@ -103,6 +104,7 @@ namespace Inventory.Reports
                 var result = await _report.LoadAsync(_filter);
                 grid.DataSource = result.Rows;
                 ShowCards(result.Cards);
+                _totals = result.Cards.Select(c => $"{c.Caption}: {c.Value}" + (c.Note != null ? $" ({c.Note})" : string.Empty)).ToList();
                 filterLabel.Text = (_report.UsesPeriodFilter ? _filter.PeriodText : $"As of {DateTime.Now:ddd dd/MM/yyyy HH:mm}")
                                    + (_report.UsesCashierFilter ? $"   ·   {_filter.UserName}" : string.Empty)
                                    + (_report.UsesCustomerFilter ? $"   ·   {_filter.CustomerName}" : string.Empty)
@@ -220,6 +222,20 @@ namespace Inventory.Reports
         }
 
         #endregion
+
+        // Print: the report as it shows (title, filters, totals, rows), on the printer chosen, after a preview
+        private void printButton_Click(object? sender, EventArgs e)
+        {
+            if (grid.Rows.Count == 0) { MessageBox.Show(this, "There is nothing to print.", Text, MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+            try
+            {
+                ReportPrint.Print(this, _report.Title, filterLabel.Text, _totals, grid, _report.IsTotalRow, _report.FormatCell);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, "Could not print:\n" + ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
 
         private void excelButton_Click(object? sender, EventArgs e)
         {

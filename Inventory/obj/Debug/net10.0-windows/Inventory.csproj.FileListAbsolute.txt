@@ -72,3 +72,4 @@ C:\Users\naim.jaber\AppData\Local\Temp\claude\inv-build-check\Inventory.deps.jso
 C:\Users\naim.jaber\AppData\Local\Temp\claude\inv-build-check\Inventory.runtimeconfig.json
 C:\Users\naim.jaber\AppData\Local\Temp\claude\inv-build-check\Inventory.dll
 C:\Users\naim.jaber\AppData\Local\Temp\claude\inv-build-check\Inventory.pdb
+C:\Projects\Inventory\Inventory\obj\Debug\net10.0-windows\Inventory.CustomerEditForm.resources
