@@ -17,6 +17,7 @@ namespace Inventory
         public CurrenciesForm()
         {
             InitializeComponent();
+            AppTheme.Apply(this);
         }
 
         private async void CurrenciesForm_Load(object? sender, EventArgs e) => await LoadAsync();

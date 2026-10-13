@@ -15,6 +15,7 @@ namespace Inventory
         public SuppliersForm()
         {
             InitializeComponent();
+            AppTheme.Apply(this);
         }
 
         private async void SuppliersForm_Load(object? sender, EventArgs e)

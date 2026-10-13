@@ -20,6 +20,7 @@ namespace Inventory
         public PurchaseEditForm(int? purchaseId = null)
         {
             InitializeComponent();
+            AppTheme.Apply(this);
             _purchaseId = purchaseId;
             _errors.ContainerControl = this;
 

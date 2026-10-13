@@ -23,6 +23,7 @@ namespace Inventory
         public AddItemForm(int? productId, int? defaultCategoryId = null)
         {
             InitializeComponent();
+            AppTheme.Apply(this);
             _productId = productId;
             _defaultCategoryId = defaultCategoryId;
 

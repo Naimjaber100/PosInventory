@@ -17,6 +17,7 @@ namespace Inventory
         public PurchaseForm()
         {
             InitializeComponent();
+            AppTheme.Apply(this);
             pageSizeCombo.SelectedItem = _pageSize;
         }
 

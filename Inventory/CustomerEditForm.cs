@@ -16,6 +16,7 @@ namespace Inventory
         public CustomerEditForm(CustomerModel? customer, CurrencySet currencies)
         {
             InitializeComponent();
+            AppTheme.Apply(this);
             _customer = customer;
             _currencies = currencies;
             limitCaption.Text = $"Credit limit ({currencies.Primary.Code})";

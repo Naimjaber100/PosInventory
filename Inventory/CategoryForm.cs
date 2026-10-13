@@ -14,6 +14,7 @@ namespace Inventory
         public CategoryForm(IReadOnlyList<CategoryModel> categories, CategoryModel? category = null, int? parentId = null)
         {
             InitializeComponent();
+            AppTheme.Apply(this);
             _category = category;
 
             // A category cannot be moved under itself or one of its sub-categories

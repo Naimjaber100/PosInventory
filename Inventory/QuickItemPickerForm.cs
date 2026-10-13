@@ -21,6 +21,7 @@ namespace Inventory
         public QuickItemPickerForm(string tabName)
         {
             InitializeComponent();
+            AppTheme.Apply(this);
             Text = $"Add items to \"{tabName}\"";
             itemsGrid.AutoGenerateColumns = false;
         }

@@ -12,6 +12,7 @@ namespace Inventory
         public CompanyForm()
         {
             InitializeComponent();
+            AppTheme.Apply(this);
         }
 
         private async void CompanyForm_Load(object? sender, EventArgs e)

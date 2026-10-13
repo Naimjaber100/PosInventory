@@ -12,6 +12,7 @@ namespace Inventory
         public QuickGroupEditForm(QuickGroupModel? group = null)
         {
             InitializeComponent();
+            AppTheme.Apply(this);
             _group = group;
 
             if (group != null)

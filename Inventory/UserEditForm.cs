@@ -16,6 +16,7 @@ namespace Inventory
         public UserEditForm(UserModel? user = null)
         {
             InitializeComponent();
+            AppTheme.Apply(this);
             _user = user;
 
             roleCombo.DataSource = new[]

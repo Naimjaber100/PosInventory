@@ -20,6 +20,7 @@ namespace Inventory.Reports
         public ReportForm(ReportDefinition report)
         {
             InitializeComponent();
+            AppTheme.Apply(this);
             _report = report;
             Text = report.Title;
             titleLabel.Text = report.Title;

@@ -21,6 +21,7 @@ namespace Inventory
         public PaymentForm(decimal total, CurrencySet currencies)
         {
             InitializeComponent();
+            AppTheme.Apply(this);
             _total = total;
             _currencies = currencies;
 

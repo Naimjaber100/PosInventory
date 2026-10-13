@@ -43,6 +43,7 @@ namespace Inventory
         public AiPurchaseImportForm(bool voice = false)
         {
             InitializeComponent();
+            AppTheme.Apply(this);
             _voice = voice;
             if (voice)
             {

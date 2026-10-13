@@ -35,6 +35,7 @@ namespace Inventory
         public QuickButtonsForm()
         {
             InitializeComponent();
+            AppTheme.Apply(this);
             itemsGrid.AutoGenerateColumns = false;
             columnsUpDown.Minimum = QuickButtonStyle.MinColumns;
             columnsUpDown.Maximum = QuickButtonStyle.MaxColumns;

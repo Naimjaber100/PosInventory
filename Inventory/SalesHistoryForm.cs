@@ -22,6 +22,7 @@ namespace Inventory
         public SalesHistoryForm()
         {
             InitializeComponent();
+            AppTheme.Apply(this);
             BuildCards();
             fromPicker.Value = toPicker.Value = DateTime.Today;
         }

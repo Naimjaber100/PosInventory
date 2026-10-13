@@ -16,6 +16,7 @@ namespace Inventory
         public ReceiptPrinterForm()
         {
             InitializeComponent();
+            AppTheme.Apply(this);
             computerLabel.Text = Environment.MachineName;
             paperCombo.SelectedIndex = 0;
         }

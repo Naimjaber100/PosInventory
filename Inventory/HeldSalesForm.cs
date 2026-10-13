@@ -11,6 +11,7 @@ namespace Inventory
         public HeldSalesForm()
         {
             InitializeComponent();
+            AppTheme.Apply(this);
         }
 
         /// <summary>The held sale chosen with Recall (after DialogResult.OK).</summary>

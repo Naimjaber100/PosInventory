@@ -14,6 +14,7 @@ namespace Inventory
         public SupplierEditForm(SupplierModel? supplier, CurrencySet currencies, string? newName = null)
         {
             InitializeComponent();
+            AppTheme.Apply(this);
             _supplier = supplier;
 
             if (supplier != null)

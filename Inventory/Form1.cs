@@ -464,13 +464,18 @@ namespace Inventory
                 close.Click += (_, _) => page.Close();
             page.TextChanged += (_, _) => _pageTitle.Text = page.Text;
 
+            // The host shows first: a form made visible inside a panel that is still hidden never loads
+            contentPanel.SuspendLayout();
             _pageTitle.Text = page.Text;
             _dashboardView.Visible = false;
             contentPanel.Padding = Padding.Empty;
-            _pageHost.Controls.Add(page);
+            // A page that has its own dark title bar (item list, reports) does not get a second title above it
+            _pageTitle.Visible = !page.Controls.Cast<Control>().Any(c => c.Dock == DockStyle.Top && c.BackColor == AppTheme.Dark);
             _pageHost.Visible = true;
+            _pageHost.Controls.Add(page);
+            _pageHost.Controls.SetChildIndex(page, 0);   // in front: it fills what the title (docked first) leaves
+            contentPanel.ResumeLayout();
             page.Show();
-            page.BringToFront();   // under the title, which is docked first
             Select(button);
             page.Select();
         }

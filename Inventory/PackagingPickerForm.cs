@@ -9,6 +9,7 @@ namespace Inventory
         public PackagingPickerForm(System.Collections.IList matches, string search)
         {
             InitializeComponent();
+            AppTheme.Apply(this);
             Text = $"Choose an item - \"{search}\" ({matches.Count} found)";
             resultsGrid.DataSource = matches;
         }

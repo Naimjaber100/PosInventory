@@ -13,7 +13,7 @@ namespace Inventory
     public partial class Item : Form
     {
         private const string AllItemsTag = "all";
-        private static readonly Color Blue = Color.FromArgb(37, 99, 235);
+        private static readonly Color Blue = AppTheme.Accent;   // the accent of the whole back office (was blue)
         private static readonly Color Dark = Color.FromArgb(22, 32, 43);
         private static readonly Color Muted = Color.FromArgb(100, 110, 122);
         private static readonly Color Green = Color.FromArgb(22, 163, 74);
@@ -39,6 +39,7 @@ namespace Inventory
         public Item()
         {
             InitializeComponent();
+            AppTheme.Apply(this);
             itemsGrid.AutoGenerateColumns = false;
             pageSizeCombo.SelectedItem = _pageSize;
             userLabel.Text = AppSession.CurrentUser != null ? $"{AppSession.UserName}  " : string.Empty;
@@ -171,7 +172,7 @@ namespace Inventory
             var row = new Rectangle(0, e.Bounds.Y, categoryTree.ClientSize.Width, e.Bounds.Height);
             var selected = (e.State & TreeNodeStates.Selected) != 0;
 
-            using (var back = new SolidBrush(selected ? Color.FromArgb(232, 240, 254) : categoryTree.BackColor)) g.FillRectangle(back, row);
+            using (var back = new SolidBrush(selected ? AppTheme.Selection : categoryTree.BackColor)) g.FillRectangle(back, row);
             if (selected)
             {
                 using var bar = new SolidBrush(Blue);
@@ -192,7 +193,7 @@ namespace Inventory
             {
                 var pill = new Rectangle(row.Right - pillWidth - 8, row.Y + (row.Height - 22) / 2, pillWidth, 22);
                 using var path = QuickButtonStyle.Rounded(pill, 11);
-                using var pillBrush = new SolidBrush(selected ? Color.FromArgb(200, 218, 252) : Color.FromArgb(238, 241, 244));
+                using var pillBrush = new SolidBrush(selected ? Color.FromArgb(190, 224, 214) : Color.FromArgb(238, 241, 244));
                 g.FillPath(pillBrush, path);
                 TextRenderer.DrawText(g, count, categoryTree.Font, pill, Dark, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
             }

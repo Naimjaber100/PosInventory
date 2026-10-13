@@ -17,8 +17,24 @@ namespace Inventory.Repositories
 
         protected BaseRepository(string? connectionString = null)
         {
-            _connectionString = connectionString ?? AppConfig.ConnectionString
-                ?? throw new InvalidOperationException("Connection string 'DefaultConnection' is not configured in appsettings.json.");
+            _connectionString = WithoutGssEncryption(connectionString ?? AppConfig.ConnectionString
+                ?? throw new InvalidOperationException("Connection string 'DefaultConnection' is not configured in appsettings.json."));
+        }
+
+        private static string? _lastGiven, _lastUsed;
+
+        // Npgsql first tries Kerberos (GSS) encryption on every new connection. On a computer that is in a Windows
+        // domain this waits for the domain controller: each new connection took many seconds, or timed out, and the
+        // screens stayed empty. The database here does not use Kerberos, so it is switched off unless appsettings.json
+        // sets "GSS Encryption Mode" itself.
+        private static string WithoutGssEncryption(string connectionString)
+        {
+            if (connectionString == _lastGiven && _lastUsed != null) return _lastUsed;
+            var used = connectionString;
+            if (!connectionString.Contains("GSS", StringComparison.OrdinalIgnoreCase))
+                used = new NpgsqlConnectionStringBuilder(connectionString) { GssEncryptionMode = GssEncryptionMode.Disable }.ConnectionString;
+            (_lastGiven, _lastUsed) = (connectionString, used);
+            return used;
         }
 
         // An open connection that knows who is logged in: database triggers record this user

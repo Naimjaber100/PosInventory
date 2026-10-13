@@ -13,6 +13,7 @@ namespace Inventory
         public UsersForm()
         {
             InitializeComponent();
+            AppTheme.Apply(this);
         }
 
         private async void UsersForm_Load(object? sender, EventArgs e) => await LoadUsersAsync();
