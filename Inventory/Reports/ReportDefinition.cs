@@ -19,6 +19,9 @@ namespace Inventory.Reports
         /// <summary>Shows the Client filter (All clients or one client).</summary>
         public virtual bool UsesCustomerFilter => false;
 
+        /// <summary>Shows the Supplier filter (All suppliers or one supplier); not together with the Client filter.</summary>
+        public virtual bool UsesSupplierFilter => false;
+
         /// <summary>Shows the period filter; false for a report of how things are now (no dates).</summary>
         public virtual bool UsesPeriodFilter => true;
 
@@ -51,6 +54,8 @@ namespace Inventory.Reports
         public string UserName { get; init; } = "All users";
         public int? CustomerId { get; init; }             // null = every client
         public string CustomerName { get; init; } = "All clients";
+        public int? SupplierId { get; init; }             // null = every supplier
+        public string SupplierName { get; init; } = "All suppliers";
         public CurrencySet Currencies { get; init; } = CurrencySet.Default;
 
         public string PeriodText => From.Date == To.Date ? From.ToString("ddd dd/MM/yyyy") : $"{From:dd/MM/yyyy} - {To:dd/MM/yyyy}";

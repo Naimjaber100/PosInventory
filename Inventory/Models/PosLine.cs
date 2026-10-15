@@ -3,13 +3,14 @@ using System.Runtime.CompilerServices;
 
 namespace Inventory.Models
 {
-    // One line on the cashier screen. Quantity, price and discount can change;
+    // One line on the cashier screen. Quantity, price and the discounts can change;
     // PropertyChanged keeps the grid and the totals up to date.
     public class PosLine : INotifyPropertyChanged
     {
         private decimal _quantity = 1;
         private decimal _unitPrice;
         private decimal _discount;
+        private decimal _promoDiscount;
 
         [Browsable(false)] public int PackagingId { get; init; }
         [Browsable(false)] public int ProductId { get; init; }
@@ -34,16 +35,30 @@ namespace Inventory.Models
             set { if (_unitPrice == value) return; _unitPrice = value; OnPropertyChanged(); OnPropertyChanged(nameof(LineTotal)); }
         }
 
-        /// <summary>Discount amount on the whole line (not per unit).</summary>
-        [DisplayName("Disc."), ReadOnly(true)]
+        /// <summary>Discount amount typed by the cashier (F5), on the whole line (not per unit).</summary>
+        [Browsable(false)]
         public decimal Discount
         {
             get => _discount;
-            set { if (_discount == value) return; _discount = value; OnPropertyChanged(); OnPropertyChanged(nameof(LineTotal)); }
+            set { if (_discount == value) return; _discount = value; OnPropertyChanged(); OnPropertyChanged(nameof(TotalDiscount)); OnPropertyChanged(nameof(LineTotal)); }
         }
 
+        /// <summary>What the promotions take off the whole line; set by the cashier screen (PromotionEngine).</summary>
+        [Browsable(false)]
+        public decimal PromoDiscount
+        {
+            get => _promoDiscount;
+            set { if (_promoDiscount == value) return; _promoDiscount = value; OnPropertyChanged(); OnPropertyChanged(nameof(TotalDiscount)); OnPropertyChanged(nameof(LineTotal)); }
+        }
+
+        /// <summary>The promotion(s) PromoDiscount comes from.</summary>
+        [Browsable(false)] public string? PromoName { get; set; }
+
+        [DisplayName("Disc.")]
+        public decimal TotalDiscount => Discount + PromoDiscount;
+
         [DisplayName("Total")]
-        public decimal LineTotal => Math.Round(Quantity * UnitPrice - Discount, 2);
+        public decimal LineTotal => Math.Round(Quantity * UnitPrice - TotalDiscount, 2);
 
         public event PropertyChangedEventHandler? PropertyChanged;
 

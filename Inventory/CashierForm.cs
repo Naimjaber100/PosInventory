@@ -18,6 +18,10 @@ namespace Inventory
     //
     // Unpaid (F3): the sale goes on a customer's account (existing, or new with name and phone); a manager approves it.
     //
+    // Promotions (back office: Item > Promotions) apply by themselves while the items are scanned: a line's discount
+    // shows in Disc. with the promotion's name next to the item, an invoice promotion shows under the total.
+    // Not on a return, and not on a line with a discount typed by the cashier (F5).
+    //
     // Keys: F1 barcode box, F2 qty, F3 unpaid sale, F4 return, F5 line discount, F6 invoice discount, F7 sales list, F8 hold, F9 recall,
     //       F10 void sale, F12 pay, +/- quantity, Del delete line, Up/Down choose line, Esc clear box.
     public partial class CashierForm : Form
@@ -35,6 +39,14 @@ namespace Inventory
         private int _quickGroupId = -1;                           // the open tab (-1 = none yet: open the first one)
         private int _quickColumns = QuickButtonStyle.DefaultColumns;
         private CurrencySet _currencies = CurrencySet.Default;   // primary currency, the second one and the rates
+        private readonly PromotionRepository _promotionRepository = new();
+        private List<PromotionModel> _promotions = new();        // the promotions running today
+        private DateTime _promotionsLoadedAt;
+        private decimal _promoDiscount;    // what an invoice promotion takes off the total (on top of the typed discount)
+        private string? _promoName;
+        private bool _applyingPromotions;
+        private readonly Label _promoLabel;
+        private readonly ToolTip _promoTip = new();
         private int? _heldSaleId;          // the recalled held sale this screen is finishing
         private TextBox _entry;            // where the keypad types (barcode box or discount box)
         private bool _returnMode;          // Return (F4): the scanned items come back and are refunded
@@ -49,8 +61,27 @@ namespace Inventory
             _entry = scanBox;
             BuildButtons();
 
-            _lines.ListChanged += (_, _) => UpdateTotals();
+            // Invoice promotion: beside the total in the second currency (the captions get the room for "Promo −1,250,000")
+            totalsTable.ColumnStyles[0].Width = 150F;
+            _promoLabel = new Label
+            {
+                Dock = DockStyle.Fill,
+                Font = new Font("Segoe UI Semibold", 9F, FontStyle.Bold),
+                ForeColor = Accent,
+                TextAlign = ContentAlignment.MiddleLeft,
+                AutoEllipsis = true,
+            };
+            totalsTable.Controls.Add(_promoLabel, 0, 3);
+
+            // The grid is bound first: it must know a new line before the promotions change it
             linesGrid.DataSource = _lines;
+            linesGrid.CellFormatting += linesGrid_CellFormatting;
+            _lines.ListChanged += (_, _) =>
+            {
+                if (_applyingPromotions) return;
+                ApplyPromotions();
+                UpdateTotals();
+            };
             UpdateTotals();
         }
 
@@ -72,6 +103,7 @@ namespace Inventory
             UpdateInfo();
             UpdateTotals();
             await LoadCurrenciesAsync();
+            await LoadPromotionsAsync();
             try { await ReceiptSettings.LoadAsync(); }
             catch { /* no receipt settings: sales still work, nothing prints */ }
         }
@@ -137,6 +169,79 @@ namespace Inventory
             if (_currencies.SecondRateMissing)
                 ShowStatus($"No exchange rate for {_currencies.Second!.Code} - sales cannot be saved. Set it in Settings > Currencies.", Color.Salmon);
         }
+
+        #region Promotions
+
+        private static readonly TimeSpan PromotionsAge = TimeSpan.FromMinutes(5);
+
+        /// <summary>
+        /// (Re)loads the promotions running today. Also called when they are changed in the back office.
+        /// betweenSales: the quiet reload after a sale (a promotion that starts or ends, a new item in a category);
+        /// it never changes a sale that is on the screen.
+        /// </summary>
+        public async Task LoadPromotionsAsync(bool betweenSales = false)
+        {
+            List<PromotionModel> promotions;
+            try
+            {
+                _promotionsLoadedAt = DateTime.Now;
+                promotions = (await _promotionRepository.GetActiveAsync()).ToList();
+            }
+            catch (Exception ex)
+            {
+                if (!betweenSales) ShowStatus("Could not load the promotions: " + (ex is Npgsql.PostgresException pg ? pg.MessageText : ex.Message), Color.Salmon);
+                return;
+            }
+            if (IsDisposed || (betweenSales && _lines.Count > 0)) return;
+            _promotions = promotions;
+            ApplyPromotions();
+            UpdateTotals();
+        }
+
+        // Works out the promotions again for the lines on the screen (after every change of a line)
+        private void ApplyPromotions()
+        {
+            if (_applyingPromotions) return;
+            try
+            {
+                _applyingPromotions = true;
+                var result = _returnMode || _promotions.Count == 0 || _lines.Count == 0
+                    ? null
+                    : PromotionEngine.Apply(_lines, _promotions, _currencies.Primary.Decimals);
+                for (var i = 0; i < _lines.Count; i++)
+                {
+                    _lines[i].PromoName = result?.LineNames[i];
+                    _lines[i].PromoDiscount = result?.LineDiscounts[i] ?? 0;
+                }
+                _promoDiscount = result?.InvoiceDiscount ?? 0;
+                _promoName = result?.InvoiceName;
+            }
+            finally
+            {
+                _applyingPromotions = false;
+            }
+            linesGrid.Invalidate();
+        }
+
+        // The promotion's name next to the item, its discount in green
+        private void linesGrid_CellFormatting(object? sender, DataGridViewCellFormattingEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.RowIndex >= _lines.Count || e.CellStyle == null) return;
+            var line = _lines[e.RowIndex];
+            if (line.PromoDiscount <= 0) return;
+            switch (linesGrid.Columns[e.ColumnIndex].DataPropertyName)
+            {
+                case nameof(PosLine.ItemName):
+                    e.Value = $"{line.ItemName}   ·   {line.PromoName}";
+                    e.FormattingApplied = true;
+                    break;
+                case nameof(PosLine.TotalDiscount):
+                    e.CellStyle.ForeColor = Accent;
+                    break;
+            }
+        }
+
+        #endregion
 
         // Keypad, line functions and actions: built here so they all share one look
         private void BuildButtons()
@@ -694,6 +799,8 @@ namespace Inventory
                 ShowStatus($"Stock check: only {item.StockQty:#,0.###} {item.BaseUnit} in stock.", Color.Khaki);
             else if (item.SalePrice == 0)
                 ShowStatus("This item has no price. A manager must set it in the item list.", Color.Khaki);
+            else if (line.PromoDiscount > 0)
+                ShowStatus($"Promotion: {line.PromoName}", Color.FromArgb(120, 220, 190));
             else
                 ShowStatus("Ready", Color.Gainsboro);
             return true;
@@ -804,7 +911,8 @@ namespace Inventory
 
         private decimal SubTotal => _lines.Sum(l => l.LineTotal);
 
-        // Invoice discount from the box: an amount, or a percent of the sub total when % is pressed
+        // Invoice discount from the box: an amount, or a percent of the sub total when % is pressed.
+        // An invoice promotion (_promoDiscount) comes on top of it.
         private bool TryGetInvoiceDiscount(out decimal discount)
         {
             discount = 0;
@@ -821,9 +929,11 @@ namespace Inventory
         {
             var sub = SubTotal;
             var validDiscount = TryGetInvoiceDiscount(out var discount);
-            discountBox.BackColor = validDiscount && discount <= sub ? SystemColors.Window : Color.MistyRose;
-            var total = sub - (validDiscount ? discount : 0);
+            discountBox.BackColor = validDiscount && discount + _promoDiscount <= sub ? SystemColors.Window : Color.MistyRose;
+            var total = sub - (validDiscount ? discount : 0) - _promoDiscount;
 
+            _promoLabel.Text = _promoDiscount > 0 ? $"Promo −{_promoDiscount:#,0}" : string.Empty;
+            _promoTip.SetToolTip(_promoLabel, _promoDiscount > 0 ? _promoName : null);
             subTotalCaption.Text = $"Sub total ({_lines.Count})";
             subTotalValue.Text = sub.ToString("#,0");
             totalValue.Text = total.ToString("#,0");
@@ -914,6 +1024,7 @@ namespace Inventory
         private bool _askingUnpaid;   // the customer / manager windows of Unpaid are open
         private bool _saving;   // stops a double press of F11 / F12 from saving the same sale twice
 
+        // discount: the whole invoice discount (typed + invoice promotion), as ValidateSale gives it.
         // customer + approver: an unpaid sale (the payments are on account)
         private async Task SaveSaleAsync(IEnumerable<SalePaymentModel> payments, decimal discount,
             CustomerModel? customer = null, UserModel? approver = null)
@@ -925,7 +1036,8 @@ namespace Inventory
                 UseWaitCursor = true;
                 if (customer is { CustomerId: 0 })   // new: added only now, after the manager approved
                     customer.CustomerId = await new CustomerRepository().SaveAsync(customer);
-                var result = await _saleRepository.SaveSaleAsync(_lines, payments, discount, _heldSaleId, AppConfig.CurrentUserId, customer?.CustomerId);
+                var result = await _saleRepository.SaveSaleAsync(_lines, payments, discount, _heldSaleId, AppConfig.CurrentUserId, customer?.CustomerId,
+                    Math.Min(_promoDiscount, discount), _promoName);
                 PrintReceipt(result.SaleId);
                 if (customer != null && approver != null)
                 {
@@ -971,7 +1083,8 @@ namespace Inventory
             if (_returnMode) { ShowStatus("A return cannot be held: refund (F12) or cancel it (F10).", Color.Khaki); return; }
             if (_lines.Count == 0) { ShowStatus("Nothing to hold.", Color.Khaki); return; }
             if (!ValidateSale(out var discount)) return;
-            if (discount > 0 && MessageBox.Show(this, "The invoice discount is not kept on a held sale. Hold anyway?", "Hold",
+            // The promotions come back by themselves when the sale is recalled; a typed discount does not
+            if (discount > _promoDiscount && MessageBox.Show(this, "The invoice discount is not kept on a held sale. Hold anyway?", "Hold",
                     MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
                 return;
 
@@ -1104,6 +1217,8 @@ namespace Inventory
         private void SetReturnMode(bool on)
         {
             _returnMode = on;
+            ApplyPromotions();   // a return has no promotions
+            UpdateTotals();
             if (!on) _returnApprover = null;   // the next return needs a manager again
             var back = on ? ReturnRed : Dark;
             topBar.BackColor = back;
@@ -1193,7 +1308,8 @@ namespace Inventory
             FocusScan();
         }
 
-        // Lines + invoice discount; marks the wrong lines in the grid
+        // Lines + invoice discount; marks the wrong lines in the grid.
+        // discount: the whole invoice discount = the one typed + the invoice promotion.
         private bool ValidateSale(out decimal discount)
         {
             if (!TryGetInvoiceDiscount(out discount))
@@ -1202,6 +1318,7 @@ namespace Inventory
                 discountBox.Focus();
                 return false;
             }
+            discount += _promoDiscount;
 
             var validation = SaleValidator.ValidateSale(_lines, discount);
             foreach (DataGridViewRow row in linesGrid.Rows) row.Cells.Cast<DataGridViewCell>().ToList().ForEach(c => c.ErrorText = string.Empty);
@@ -1227,6 +1344,7 @@ namespace Inventory
             lastItemPrice.Text = string.Empty;
             UpdateInfo();
             UpdateTotals();
+            if (DateTime.Now - _promotionsLoadedAt > PromotionsAge) _ = LoadPromotionsAsync(betweenSales: true);
         }
 
         private void CashierForm_FormClosing(object? sender, FormClosingEventArgs e)
@@ -1244,8 +1362,8 @@ namespace Inventory
         private void ShowLastItem(PosLine line)
         {
             lastItemName.Text = line.ItemName;
-            lastItemPrice.Text = line.Discount > 0
-                ? $"{line.Quantity:#,0.###} x {line.UnitPrice:#,0} - {line.Discount:#,0} = {line.LineTotal:#,0}"
+            lastItemPrice.Text = line.TotalDiscount > 0
+                ? $"{line.Quantity:#,0.###} x {line.UnitPrice:#,0} - {line.TotalDiscount:#,0} = {line.LineTotal:#,0}"
                 : $"{line.Quantity:#,0.###} x {line.UnitPrice:#,0} = {line.LineTotal:#,0}";
         }
 

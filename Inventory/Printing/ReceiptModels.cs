@@ -16,6 +16,7 @@ namespace Inventory.Printing
         public decimal SubTotal { get; set; }
         public decimal LineDiscounts { get; set; }
         public decimal Discount { get; set; }          // invoice discount
+        public string? PromoName { get; set; }         // the invoice promotion in it, if any
         public decimal Total { get; set; }
         public decimal ChangeLbp { get; set; }
         public decimal UsdRate { get; set; }
@@ -41,10 +42,10 @@ namespace Inventory.Printing
             InvoiceNo = "S-TEST-000001",
             InvoiceDate = DateTimeOffset.Now,
             Cashier = AppSession.UserName,
-            SubTotal = 1_185_000, Discount = 10_000, Total = 1_175_000, ChangeLbp = 25_000, UsdRate = 89_500,
+            SubTotal = 1_155_000, LineDiscounts = 30_000, Discount = 10_000, Total = 1_145_000, ChangeLbp = 55_000, UsdRate = 89_500,
             Lines =
             {
-                new() { ItemName = "Pepsi 330 ml", Quantity = 6, UnitPrice = 45_000, LineTotal = 270_000 },
+                new() { ItemName = "Pepsi 330 ml", Quantity = 6, UnitPrice = 45_000, Discount = 30_000, PromoName = "Pepsi 3 for 120,000", LineTotal = 240_000 },
                 new() { ItemName = "بيض بلدي - كرتونة 30", Quantity = 1, UnitPrice = 360_000, LineTotal = 360_000 },
                 new() { ItemName = "Halloumy cheese", Quantity = 0.750m, UnitPrice = 600_000, LineTotal = 450_000 },
                 new() { ItemName = "Unica chocolate bar with a very long name to show the wrapping", Quantity = 3, UnitPrice = 35_000, Discount = 0, LineTotal = 105_000 },
@@ -68,6 +69,7 @@ namespace Inventory.Printing
         public decimal Quantity { get; set; }
         public decimal UnitPrice { get; set; }
         public decimal Discount { get; set; }
+        public string? PromoName { get; set; }   // the promotion the discount comes from, if any
         public decimal LineTotal { get; set; }
     }
 

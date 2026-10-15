@@ -7,6 +7,7 @@ namespace Inventory
     // "Add items": picks items from the item list for a tab of quick buttons.
     // Search by name / barcode and filter by category; click a row (or Space) to tick it.
     // Items that already have a button show the tab they are on and cannot be ticked.
+    // Also picks the items of a promotion: then every item can be ticked.
     public partial class QuickItemPickerForm : Form
     {
         private const int AllCategories = 0;
@@ -14,6 +15,8 @@ namespace Inventory
         private readonly QuickButtonRepository _quickButtonRepository = new();
         private readonly CategoryRepository _categoryRepository = new();
         private readonly List<int> _picked = new();                  // packaging ids in the order they were ticked
+        private readonly Dictionary<int, QuickItemModel> _pickedItems = new();
+        private readonly bool _anyItem;
         private Dictionary<int, string> _categoryPaths = new();
         private BindingList<PickRow> _rows = new();
         private bool _loading;
@@ -26,8 +29,18 @@ namespace Inventory
             itemsGrid.AutoGenerateColumns = false;
         }
 
+        /// <summary>Picks from every item, also those that have a quick button (the items of a promotion).</summary>
+        public QuickItemPickerForm(string title, bool anyItem) : this(title)
+        {
+            Text = title;
+            _anyItem = anyItem;
+            tabColumn.Visible = !anyItem;
+        }
+
         /// <summary>The ticked items, in the order they were ticked.</summary>
         public IReadOnlyList<int> PickedPackagingIds => _picked;
+
+        public IReadOnlyList<QuickItemModel> PickedItems => _picked.Select(id => _pickedItems[id]).ToList();
 
         // One row of the grid
         private sealed class PickRow
@@ -39,7 +52,7 @@ namespace Inventory
             public string? Barcode => Item.Barcode;
             public string Price => $"{Item.SalePrice:#,0}{(Item.IsWeighted ? " / " + Item.BaseUnit : string.Empty)}";
             public string OnTab => Item.ButtonTab ?? string.Empty;
-            public bool CanPick => Item.ButtonTab == null;
+            public bool CanPick { get; init; }
         }
 
         private async void QuickItemPickerForm_Load(object? sender, EventArgs e)
@@ -75,6 +88,7 @@ namespace Inventory
                 {
                     Item = i,
                     Picked = _picked.Contains(i.PackagingId),
+                    CanPick = _anyItem || i.ButtonTab == null,
                     Category = i.CategoryId is int c && _categoryPaths.TryGetValue(c, out var path) ? path : string.Empty,
                 }).ToList());
                 itemsGrid.DataSource = _rows;
@@ -139,6 +153,7 @@ namespace Inventory
             row.Picked = picked;
             _picked.Remove(row.Item.PackagingId);
             if (picked) _picked.Add(row.Item.PackagingId);
+            _pickedItems[row.Item.PackagingId] = row.Item;
         }
 
         // Ticks (or unticks) every item shown that can be picked

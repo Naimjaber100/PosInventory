@@ -17,6 +17,9 @@ namespace Inventory.Repositories
         public const string ReportSalesUnpaid = "fn_report_sales_unpaid";
         public const string ReportUnpaidByCustomer = "fn_report_unpaid_by_customer";
         public const string ReportCustomerStatement = "fn_report_customer_statement";
+        public const string ReportPurchasesByInvoice = "fn_report_purchases_by_invoice";
+        public const string ReportPurchasesByItem = "fn_report_purchases_by_item";
+        public const string ReportPurchasesBySupplier = "fn_report_purchases_by_supplier";
 
         // Company, one record (Database/company_functions.sql)
         public const string GetCompany = "fn_company_get";
@@ -69,6 +72,13 @@ namespace Inventory.Repositories
         public const string HoldSale = "fn_hold_sale";
         public const string GetSetting = "fn_setting";
         public const string SetSetting = "fn_setting_set";   // Database/quick_button_functions.sql
+
+        // Promotions (Database/promotion_functions.sql)
+        public const string GetPromotions = "fn_promotion_get_all";
+        public const string GetActivePromotions = "fn_promotion_get_active";
+        public const string GetPromotionItems = "fn_promotion_get_items";
+        public const string SavePromotion = "fn_promotion_save";
+        public const string DeletePromotion = "fn_promotion_delete";
 
         // Clients and suppliers (Database/party_functions.sql)
         public const string GetCustomers = "fn_customer_get_all";

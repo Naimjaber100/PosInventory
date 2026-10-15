@@ -55,6 +55,12 @@
     <Compile Update="PaymentForm.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Update="PromotionEditForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="PromotionsForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Update="PurchaseEditForm.cs">
       <SubType>Form</SubType>
     </Compile>

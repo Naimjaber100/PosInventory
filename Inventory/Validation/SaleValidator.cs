@@ -31,7 +31,7 @@ namespace Inventory.Validation
 
             if (line.Discount < 0)
                 result.Add($"{where}: discount cannot be negative.", nameof(PosLine.Discount), lineIndex);
-            else if (line.Discount > line.Quantity * line.UnitPrice)
+            else if (line.TotalDiscount > line.Quantity * line.UnitPrice)
                 result.Add($"{where}: discount is bigger than the line.", nameof(PosLine.Discount), lineIndex);
 
             return result;

@@ -268,3 +268,113 @@ namespace Inventory.Models
         [Browsable(false)] public bool IsOpening => EntryType == OpeningType && !IsTotal;
     }
 }
+
+namespace Inventory.Models
+{
+    // Report 7 - Purchases by invoice: one row of fn_report_purchases_by_invoice (amounts in the primary currency,
+    // except Total, which is in the invoice's own currency). The report adds a TOTAL row at the end (IsTotal).
+    public class PurchasesByInvoiceRow
+    {
+        [Browsable(false)] public int PurchaseId { get; set; }
+        [Browsable(false)] public bool IsTotal { get; set; }
+
+        [DisplayName("Purchase")] public string PurchaseNo { get; set; } = string.Empty;
+        [DisplayName("Date")] public DateTime? InvoiceDate { get; set; }
+        [DisplayName("Supplier")] public string? Supplier { get; set; }
+        [DisplayName("Supplier invoice")] public string? SupplierInvoiceNo { get; set; }
+        [DisplayName("Lines")] public long ItemCount { get; set; }
+        [DisplayName("Total (own currency)")] public string TotalText => IsTotal ? string.Empty : $"{Currency} {Total:#,0.##}";
+        [Browsable(false)] public string Currency { get; set; } = string.Empty;
+        [Browsable(false)] public decimal Total { get; set; }
+        [DisplayName("Discount")] public decimal DiscountLbp { get; set; }
+        [DisplayName("Total")] public decimal TotalLbp { get; set; }
+        [DisplayName("Paid")] public decimal PaidLbp { get; set; }
+        [DisplayName("Still owed")] public decimal OwedLbp { get; set; }
+        [DisplayName("Status")] public string Status => IsTotal ? string.Empty : OwedLbp <= 0 ? "Paid" : PaidLbp > 0 ? "Part paid" : "Unpaid";
+        [DisplayName("Entered by")] public string? EnteredBy { get; set; }
+
+        /// <summary>The TOTAL row of a list of purchases.</summary>
+        public static PurchasesByInvoiceRow TotalOf(IReadOnlyCollection<PurchasesByInvoiceRow> invoices) => new()
+        {
+            IsTotal = true,
+            PurchaseNo = $"TOTAL  ({invoices.Count} purchases)",
+            ItemCount = invoices.Sum(i => i.ItemCount),
+            DiscountLbp = invoices.Sum(i => i.DiscountLbp),
+            TotalLbp = invoices.Sum(i => i.TotalLbp),
+            PaidLbp = invoices.Sum(i => i.PaidLbp),
+            OwedLbp = invoices.Sum(i => i.OwedLbp),
+        };
+    }
+}
+
+namespace Inventory.Models
+{
+    // Report 8 - Purchases by item: one row of fn_report_purchases_by_item (primary currency; quantities and unit
+    // costs per base unit, after the invoice discount). The report adds a TOTAL row at the end (IsTotal).
+    public class PurchasesByItemRow
+    {
+        [Browsable(false)] public int ProductId { get; set; }
+        [Browsable(false)] public bool IsTotal { get; set; }
+
+        [DisplayName("Item")] public string ItemName { get; set; } = string.Empty;
+        [DisplayName("Category")] public string? CategoryName { get; set; }
+        [DisplayName("Qty bought")] public decimal? Qty { get; set; }
+        [DisplayName("Unit")] public string? BaseUnit { get; set; }
+        [DisplayName("Cost")] public decimal Cost { get; set; }
+        [DisplayName("% of purchases")] public decimal? Share { get; set; }   // filled by the report
+        [DisplayName("Avg unit cost")] public decimal? AvgUnitCost { get; set; }
+        [DisplayName("Last unit cost")] public decimal? LastUnitCost { get; set; }
+        [DisplayName("Lowest")] public decimal? MinUnitCost { get; set; }
+        [DisplayName("Highest")] public decimal? MaxUnitCost { get; set; }
+        [DisplayName("Avg cost now")] public decimal? AvgCostNow { get; set; }
+        [DisplayName("Invoices")] public long? InvoiceCount { get; set; }
+        [DisplayName("Last bought")] public DateTime? LastBought { get; set; }
+        [DisplayName("Suppliers")] public string? Suppliers { get; set; }
+
+        /// <summary>The price went up: the last unit cost is more than the lowest of the period.</summary>
+        [Browsable(false)] public bool CostWentUp => !IsTotal && LastUnitCost > MinUnitCost;
+
+        /// <summary>The TOTAL row of a list of items (quantities are not added: units differ).</summary>
+        public static PurchasesByItemRow TotalOf(IReadOnlyCollection<PurchasesByItemRow> items) => new()
+        {
+            IsTotal = true,
+            ItemName = $"TOTAL  ({items.Count} items)",
+            Cost = items.Sum(i => i.Cost),
+            Share = items.Count > 0 ? 100 : null,
+        };
+    }
+}
+
+namespace Inventory.Models
+{
+    // Report 9 - Purchases by supplier: one row of fn_report_purchases_by_supplier (amounts in the primary currency).
+    // Owed now is for all time, not only the period. The report adds a TOTAL row at the end (IsTotal).
+    public class PurchasesBySupplierRow
+    {
+        [Browsable(false)] public int? SupplierId { get; set; }
+        [Browsable(false)] public bool IsTotal { get; set; }
+
+        [DisplayName("Supplier")] public string Supplier { get; set; } = string.Empty;
+        [DisplayName("Phone")] public string? Phone { get; set; }
+        [DisplayName("Purchases #")] public long InvoiceCount { get; set; }
+        [DisplayName("Purchases")] public decimal Purchases { get; set; }
+        [DisplayName("% of purchases")] public decimal? Share { get; set; }   // filled by the report
+        [DisplayName("Discounts")] public decimal Discounts { get; set; }
+        [DisplayName("Paid in period")] public decimal Paid { get; set; }
+        [DisplayName("Last purchase")] public DateTime? LastPurchase { get; set; }
+        [DisplayName("We owe now")] public decimal? OwedNow { get; set; }
+
+        /// <summary>The TOTAL row of a list of suppliers.</summary>
+        public static PurchasesBySupplierRow TotalOf(IReadOnlyCollection<PurchasesBySupplierRow> suppliers) => new()
+        {
+            IsTotal = true,
+            Supplier = $"TOTAL  ({suppliers.Count} suppliers)",
+            InvoiceCount = suppliers.Sum(s => s.InvoiceCount),
+            Purchases = suppliers.Sum(s => s.Purchases),
+            Share = suppliers.Count > 0 ? 100 : null,
+            Discounts = suppliers.Sum(s => s.Discounts),
+            Paid = suppliers.Sum(s => s.Paid),
+            OwedNow = suppliers.Sum(s => s.OwedNow ?? 0),
+        };
+    }
+}

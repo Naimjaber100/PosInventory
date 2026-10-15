@@ -140,13 +140,14 @@ namespace Inventory
                 Padding = new Padding(12, 10, 0, 8),
             };
 
-            // The lists open as a page inside this window (ShowPage); the settings are small windows of their own
+            // Every page opens inside this window (ShowPage); only the cashier has a window of its own
             _dashboardButton = AddPage(nav, "Dashboard", HomeIcon, _ => ShowDashboard());
             Select(_dashboardButton);
 
             _itemsButton = AddGroup(nav, "Item", ItemIcon,
                 ("Item list", b => ShowPage(b, () => new Item())),
-                ("POS buttons (cashier)", _ => ShowDialog<QuickButtonsForm>()))[0];
+                ("Promotions", b => ShowPage(b, () => new PromotionsForm())),
+                ("POS buttons (cashier)", b => ShowPage(b, () => new QuickButtonsForm())))[0];
             _clientsButton = AddGroup(nav, "Contacts", PeopleIcon,
                 ("Clients", b => ShowPage(b, () => new CustomersForm())),
                 ("Suppliers", b => ShowPage(b, () => new SuppliersForm())))[0];
@@ -158,16 +159,20 @@ namespace Inventory
                 ("Sales by item (profit)", b => OpenReport(new Reports.SalesByItemReport(), b)),
                 ("Sales and unpaid", b => OpenReport(new Reports.SalesUnpaidReport(), b)),
                 ("Unpaid by client", b => OpenReport(new Reports.UnpaidByCustomerReport(), b)),
-                ("Client statement", b => OpenReport(new Reports.CustomerStatementReport(), b)));
+                ("Client statement", b => OpenReport(new Reports.CustomerStatementReport(), b)),
+                ("Purchases by invoice", b => OpenReport(new Reports.PurchasesByInvoiceReport(), b)),
+                ("Purchases by item", b => OpenReport(new Reports.PurchasesByItemReport(), b)),
+                ("Purchases by supplier", b => OpenReport(new Reports.PurchasesBySupplierReport(), b)));
             AddGroup(nav, "Settings", SettingsIcon,
-                ("Company", async _ =>
+                ("Company", b => ShowPage(b, () =>
                 {
-                    using var form = new CompanyForm();
-                    if (form.ShowDialog(this) == DialogResult.OK) await ShowCompanyNameAsync();
-                }),
-                ("Currencies & exchange rates", _ => ShowDialog<CurrenciesForm>()),
-                ("Users", _ => ShowDialog<UsersForm>()),
-                ("Receipt printer", _ => ShowDialog<ReceiptPrinterForm>()));
+                    var form = new CompanyForm();
+                    form.FormClosed += async (_, _) => { if (form.DialogResult == DialogResult.OK) await ShowCompanyNameAsync(); };
+                    return form;
+                })),
+                ("Currencies & exchange rates", b => ShowPage(b, () => new CurrenciesForm())),
+                ("Users", b => ShowPage(b, () => new UsersForm())),
+                ("Receipt printer", b => ShowPage(b, () => new ReceiptPrinterForm())));
 
             // Cashier and who is logged in, at the bottom
             var bottom = new Panel { Dock = DockStyle.Bottom, Height = 148, Padding = new Padding(12, 8, 12, 10) };
@@ -442,15 +447,20 @@ namespace Inventory
         /// <summary>
         /// Shows a list (items, purchases, clients, a report...) inside this window, in place of the dashboard, like a
         /// page of a web site. Its Add / Edit windows still open on top. button = its line in the menu on the left.
+        /// Saving or cancelling a settings page (Company, Receipt printer...) closes it and goes back to the dashboard.
         /// </summary>
         private void ShowPage(Button button, Func<Form> create)
         {
             if (!ClosePage()) return;
 
             var page = create();
+            // A small fixed window (Company, Receipt printer) keeps its size, at the top left under the title;
+            // the lists fill the page
+            var small = page.FormBorderStyle is FormBorderStyle.FixedDialog or FormBorderStyle.FixedSingle;
             page.TopLevel = false;
             page.FormBorderStyle = FormBorderStyle.None;
-            page.Dock = DockStyle.Fill;
+            if (small) page.Anchor = AnchorStyles.Top | AnchorStyles.Left;
+            else page.Dock = DockStyle.Fill;
             _page = page;
 
             // Close / Esc on the page goes back to the dashboard
@@ -471,6 +481,7 @@ namespace Inventory
             contentPanel.Padding = Padding.Empty;
             // A page that has its own dark title bar (item list, reports) does not get a second title above it
             _pageTitle.Visible = !page.Controls.Cast<Control>().Any(c => c.Dock == DockStyle.Top && c.BackColor == AppTheme.Dark);
+            if (small) page.Location = new Point(24, _pageTitle.Visible ? _pageTitle.Height : 12);
             _pageHost.Visible = true;
             _pageHost.Controls.Add(page);
             _pageHost.Controls.SetChildIndex(page, 0);   // in front: it fills what the title (docked first) leaves
@@ -734,13 +745,6 @@ namespace Inventory
         #endregion
 
         #region Opening the pages
-
-        // A settings window: it is closed before going on
-        private void ShowDialog<T>() where T : Form, new()
-        {
-            using var form = new T();
-            form.ShowDialog(this);
-        }
 
         // Invoice: the sales and returns of a period (all cashiers), with their Unpaid / Paid status and the receipt
         private void ShowSales(DateTime from, DateTime to) => ShowPage(_invoiceButton, () => new SalesHistoryForm(from, to, null));

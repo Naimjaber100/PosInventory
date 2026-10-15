@@ -1,6 +1,6 @@
 -- Printed receipts (cashier, 80 mm printer): everything one receipt needs in a single call, so printing
 -- right after a sale costs one quick database trip. Also used to reprint an old invoice (Sales F7).
--- Safe to re-run.
+-- Safe to re-run. Apply after pos_functions.sql (it adds the promo_name columns).
 -- Apply:  psql -h localhost -U postgres -d Pos -f receipt_functions.sql
 
 DROP FUNCTION IF EXISTS public.fn_sale_receipt(integer);
@@ -8,9 +8,10 @@ DROP FUNCTION IF EXISTS public.fn_sale_receipt(integer);
 -- One sale or return as JSON:
 -- { company: {name, address, mobile, email, vat_number},
 --   invoice_no, invoice_type (1 sale, 2 return), invoice_date, cashier, customer,
---   sub_total, line_discounts, discount, total, change_lbp, usd_rate, primary_code,
---   lines:    [{ item_name, quantity, unit_price, discount, line_total }],
+--   sub_total, line_discounts, discount, promo_name, total, change_lbp, usd_rate, primary_code,
+--   lines:    [{ item_name, quantity, unit_price, discount, promo_name, line_total }],
 --   payments: [{ method (1 cash, 2 card, 3 account), currency, amount, amount_lbp }] }
+-- promo_name: the promotion a line's discount / the invoice discount came from (Database/promotion_functions.sql).
 -- NULL when the sale does not exist.
 CREATE OR REPLACE FUNCTION public.fn_sale_receipt(p_sale_id integer)
 RETURNS jsonb
@@ -28,13 +29,14 @@ AS $$
         'sub_total', si.sub_total,
         'line_discounts', (SELECT coalesce(sum(l.discount), 0) FROM sales_lines l WHERE l.sale_id = si.sale_id),
         'discount', si.discount,
+        'promo_name', si.promo_name,
         'total', si.total,
         'change_lbp', si.change_lbp,
         'usd_rate', si.exchange_rate,
         'primary_code', (SELECT code FROM currencies WHERE is_primary),
         'lines', coalesce((SELECT jsonb_agg(jsonb_build_object(
                                 'item_name', l.description, 'quantity', l.quantity, 'unit_price', l.unit_price,
-                                'discount', l.discount, 'line_total', round(l.quantity * l.unit_price - l.discount, 2))
+                                'discount', l.discount, 'promo_name', l.promo_name, 'line_total', round(l.quantity * l.unit_price - l.discount, 2))
                             ORDER BY l.line_no)
                            FROM sales_lines l WHERE l.sale_id = si.sale_id), '[]'::jsonb),
         'payments', coalesce((SELECT jsonb_agg(jsonb_build_object(

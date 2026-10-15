@@ -3,7 +3,7 @@ using Inventory.Repositories;
 
 namespace Inventory.Reports
 {
-    // The screen every report uses: period (quick buttons or From / To), cashier, total cards, the rows,
+    // The screen every report uses: period (quick buttons or From / To), cashier, client or supplier, total cards, the rows,
     // export to Excel. What is shown comes from the report (ReportDefinition).
     public partial class ReportForm : Form
     {
@@ -27,12 +27,14 @@ namespace Inventory.Reports
             descriptionLabel.Text = report.Description;
             hintLabel.Text = report.DoubleClickHint ?? string.Empty;
             userCaption.Visible = userCombo.Visible = report.UsesCashierFilter;
-            customerCaption.Visible = customerCombo.Visible = report.UsesCustomerFilter;
+            // The client box also serves as the supplier box (a report has one or the other)
+            customerCaption.Visible = customerCombo.Visible = report.UsesCustomerFilter || report.UsesSupplierFilter;
+            if (report.UsesSupplierFilter) customerCaption.Text = "Supplier";
             if (!report.UsesPeriodFilter)
             {
                 foreach (Control control in filterPanel.Controls)
                     if (control != userCaption && control != userCombo && control != customerCaption && control != customerCombo) control.Visible = false;
-                filterPanel.Visible = report.UsesCashierFilter || report.UsesCustomerFilter;
+                filterPanel.Visible = report.UsesCashierFilter || customerCombo.Visible;
             }
             (fromPicker.Value, toPicker.Value) = report.DefaultPeriod;
         }
@@ -77,6 +79,24 @@ namespace Inventory.Reports
                     customerCaption.Visible = customerCombo.Visible = false;
                 }
             }
+            else if (_report.UsesSupplierFilter)
+            {
+                try
+                {
+                    // Every supplier, also the inactive ones (their history stays)
+                    var suppliers = (await new SupplierRepository().GetAllAsync(null, includeInactive: true)).ToList();
+                    customerCombo.DisplayMember = "Name";
+                    customerCombo.ValueMember = "Id";
+                    customerCombo.DataSource = new[] { new { Id = AllCustomers, Name = "All suppliers" } }
+                        .Concat(suppliers.Select(s => new { Id = s.SupplierId, Name = s.Name + (string.IsNullOrWhiteSpace(s.Phone) ? string.Empty : $"  ·  {s.Phone}") }))
+                        .ToList();
+                    customerCombo.SelectedValue = AllCustomers;
+                }
+                catch
+                {
+                    customerCaption.Visible = customerCombo.Visible = false;
+                }
+            }
             _loading = false;
             await LoadReportAsync();
         }
@@ -86,7 +106,9 @@ namespace Inventory.Reports
             if (_loading) return;
             if (toPicker.Value.Date < fromPicker.Value.Date) toPicker.Value = fromPicker.Value;
             var userId = userCombo.Visible && userCombo.SelectedValue is int id && id != AllUsers ? id : (int?)null;
-            var customerId = customerCombo.Visible && customerCombo.SelectedValue is int cid && cid != AllCustomers ? cid : (int?)null;
+            var partyId = customerCombo.Visible && customerCombo.SelectedValue is int cid && cid != AllCustomers ? cid : (int?)null;
+            var customerId = _report.UsesSupplierFilter ? null : partyId;
+            var supplierId = _report.UsesSupplierFilter ? partyId : null;
             _filter = new ReportFilter
             {
                 From = fromPicker.Value.Date,
@@ -95,6 +117,8 @@ namespace Inventory.Reports
                 UserName = userId == null ? "All users" : userCombo.Text,
                 CustomerId = customerId,
                 CustomerName = customerId == null ? "All clients" : customerCombo.Text,
+                SupplierId = supplierId,
+                SupplierName = supplierId == null ? "All suppliers" : customerCombo.Text,
                 Currencies = _currencies,
             };
 
@@ -109,6 +133,7 @@ namespace Inventory.Reports
                 filterLabel.Text = (_report.UsesPeriodFilter ? _filter.PeriodText : $"As of {DateTime.Now:ddd dd/MM/yyyy HH:mm}")
                                    + (_report.UsesCashierFilter ? $"   ·   {_filter.UserName}" : string.Empty)
                                    + (_report.UsesCustomerFilter ? $"   ·   {_filter.CustomerName}" : string.Empty)
+                                   + (_report.UsesSupplierFilter ? $"   ·   {_filter.SupplierName}" : string.Empty)
                                    + $"   ·   amounts in {_currencies.Primary.Code}";
                 timeLabel.Text = $"{result.Rows.Count} row(s) in {(DateTime.Now - started).TotalSeconds:0.00} s";
             }

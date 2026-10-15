@@ -14,8 +14,17 @@ DROP FUNCTION IF EXISTS public.fn_save_return(integer, jsonb, integer, text, int
 DROP FUNCTION IF EXISTS public.fn_sales_by_user(integer, date, date);
 DROP FUNCTION IF EXISTS public.fn_sale_get_lines(integer);
 
+DROP FUNCTION IF EXISTS public.fn_save_sale(integer, jsonb, jsonb, integer, integer, numeric, integer);   -- before promotions
+
 -- What is still unpaid of an on-account sale (set by fn_save_sale; Database/customer_payment_functions.sql settles it)
 ALTER TABLE public.sales_invoices ADD COLUMN IF NOT EXISTS due_lbp numeric(18,2) NOT NULL DEFAULT 0;
+
+-- Promotions (Database/promotion_functions.sql): the part of "discount" that came from a promotion, and its name.
+-- discount still holds the whole discount, so the reports did not change.
+ALTER TABLE public.sales_lines    ADD COLUMN IF NOT EXISTS promo_discount numeric(18,2) NOT NULL DEFAULT 0;
+ALTER TABLE public.sales_lines    ADD COLUMN IF NOT EXISTS promo_name     text;
+ALTER TABLE public.sales_invoices ADD COLUMN IF NOT EXISTS promo_discount numeric(18,2) NOT NULL DEFAULT 0;
+ALTER TABLE public.sales_invoices ADD COLUMN IF NOT EXISTS promo_name     text;
 
 -- ---------------------------------------------------------------------------
 -- Sales screen (cashier F7): finished sales and returns between two dates (inclusive), newest first.
@@ -302,8 +311,13 @@ END $$;
 -- Saves and finishes a sale (it was created in the database before; kept here since the multi-currency
 -- change). Payments can be in any active currency of the list: each one is converted with
 -- fn_currency_rate (Database/currency_functions.sql). All or nothing.
+-- Promotions are worked out by the cashier screen, like the prices: a line's "discount" and p_invoice_discount
+-- are the whole discount; "promo_discount" / p_promo_discount say how much of it came from a promotion
+-- ("promo_name" / p_promo_name: which one), for the receipt.
+-- p_lines: [{ "packaging_id": 12, "quantity": 3, "unit_price": 45000, "discount": 15000,
+--             "promo_discount": 15000, "promo_name": "Pepsi 3 for 120,000" }, ...]
 -- ---------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION public.fn_save_sale(p_user_id integer, p_lines jsonb, p_payments jsonb, p_shift_id integer DEFAULT NULL::integer, p_customer_id integer DEFAULT NULL::integer, p_invoice_discount numeric DEFAULT 0, p_held_sale_id integer DEFAULT NULL::integer)
+CREATE OR REPLACE FUNCTION public.fn_save_sale(p_user_id integer, p_lines jsonb, p_payments jsonb, p_shift_id integer DEFAULT NULL::integer, p_customer_id integer DEFAULT NULL::integer, p_invoice_discount numeric DEFAULT 0, p_held_sale_id integer DEFAULT NULL::integer, p_promo_discount numeric DEFAULT 0, p_promo_name text DEFAULT NULL::text)
  RETURNS TABLE(sale_id integer, invoice_no text, total_lbp numeric, change_lbp numeric)
  LANGUAGE plpgsql
 AS $function$
@@ -311,6 +325,7 @@ AS $function$
 DECLARE
     v_rate       numeric := fn_current_rate();
     v_disc       numeric := coalesce(p_invoice_discount, 0);
+    v_promo      numeric := coalesce(p_promo_discount, 0);
     v_count      int;
     v_sub        numeric;
     v_cost       numeric;
@@ -345,6 +360,8 @@ BEGIN
            pk.factor,
            coalesce((x.j->>'unit_price')::numeric, pk.sale_price)::numeric(18,2) AS unit_price,
            coalesce((x.j->>'discount')::numeric, 0)::numeric(18,2)              AS discount,
+           coalesce((x.j->>'promo_discount')::numeric, 0)::numeric(18,2)        AS promo_discount,
+           nullif(trim(x.j->>'promo_name'), '')                   AS promo_name,
            0::numeric(18,4)                                       AS unit_cost,
            0::numeric(18,2)                                       AS gross,         -- qty x price - line discount
            0::numeric(18,2)                                       AS disc_share     -- share of the invoice discount
@@ -357,7 +374,8 @@ BEGIN
         RAISE EXCEPTION 'An item on the invoice cannot be sold (not found or not active).';
     END IF;
     IF EXISTS (SELECT 1 FROM _l WHERE quantity IS NULL OR quantity <= 0 OR unit_price < 0 OR discount < 0
-                                   OR discount > quantity * unit_price) THEN
+                                   OR discount > quantity * unit_price
+                                   OR promo_discount < 0 OR promo_discount > discount) THEN
         RAISE EXCEPTION 'Check quantities, prices and discounts on the invoice.';
     END IF;
     SELECT description INTO v_msg FROM _l WHERE NOT is_weighted AND quantity <> trunc(quantity) LIMIT 1;
@@ -403,7 +421,7 @@ BEGIN
     UPDATE _l SET gross = round(quantity * unit_price - discount, 2);
     SELECT sum(gross), sum(round(quantity * unit_cost, 2)) INTO v_sub, v_cost FROM _l;
     v_total := v_sub - v_disc;
-    IF v_disc < 0 OR v_total < 0 THEN RAISE EXCEPTION 'The invoice discount is not valid.'; END IF;
+    IF v_disc < 0 OR v_total < 0 OR v_promo < 0 OR v_promo > v_disc THEN RAISE EXCEPTION 'The invoice discount is not valid.'; END IF;
 
     IF v_disc > 0 THEN
         UPDATE _l SET disc_share = round(v_disc * gross / v_sub, 2);
@@ -457,18 +475,22 @@ BEGIN
     v_no := fn_next_doc_no('S');
 
     INSERT INTO sales_invoices (invoice_no, invoice_type, customer_id, shift_id, user_id, exchange_rate,
-                                sub_total, discount, total, total_cost, profit, change_lbp, status, due_lbp)
+                                sub_total, discount, total, total_cost, profit, change_lbp, status, due_lbp,
+                                promo_discount, promo_name)
     VALUES (v_no, 1, p_customer_id, p_shift_id, p_user_id, v_rate,
             v_sub, v_disc, v_total, v_cost, v_total - v_cost, v_change, 1,
-            v_on_account)   -- unpaid until the client pays (Database/customer_payment_functions.sql)
+            v_on_account,   -- unpaid until the client pays (Database/customer_payment_functions.sql)
+            v_promo, CASE WHEN v_promo > 0 THEN nullif(trim(p_promo_name), '') END)
     RETURNING sale_id INTO v_sale_id;
 
     INSERT INTO sales_lines (sale_id, line_no, product_id, packaging_id, description, quantity, factor,
-                             unit_price, discount, discount_share, unit_cost, line_total, line_profit)
+                             unit_price, discount, discount_share, unit_cost, line_total, line_profit,
+                             promo_discount, promo_name)
     SELECT v_sale_id, line_no, product_id, packaging_id, description, quantity, factor,
            unit_price, discount, disc_share, unit_cost,
            gross - disc_share,
-           gross - disc_share - round(quantity * unit_cost, 2)
+           gross - disc_share - round(quantity * unit_cost, 2),
+           promo_discount, CASE WHEN promo_discount > 0 THEN promo_name END
     FROM _l ORDER BY line_no;
 
     -- Remember what was inside each bundle, so a return puts back exactly that

@@ -57,7 +57,9 @@ namespace Inventory.Printing
                 y = Text(g, line.ItemName, _normal, y, Align.Auto);
                 var qty = line.Quantity == Math.Round(line.Quantity) ? line.Quantity.ToString("#,0") : line.Quantity.ToString("#,0.###");
                 var left = $"   {qty} x {Number(line.UnitPrice)}" + (line.Discount > 0 ? $"   (-{Number(line.Discount)})" : string.Empty);
-                y = TwoColumns(g, left, Number(line.LineTotal), _normal, y) + 2;
+                y = TwoColumns(g, left, Number(line.LineTotal), _normal, y);
+                if (line.Discount > 0 && !string.IsNullOrWhiteSpace(line.PromoName)) y = Text(g, $"   Promo: {line.PromoName}", _small, y, Align.Left);
+                y += 2;
             }
             y = Separator(g, y);
 
@@ -67,6 +69,7 @@ namespace Inventory.Printing
             {
                 y = TwoColumns(g, "Sub total", Number(_r.SubTotal + _r.LineDiscounts), _normal, y);
                 y = TwoColumns(g, "Discount", "-" + Number(discounts), _normal, y);
+                if (_r.Discount > 0 && !string.IsNullOrWhiteSpace(_r.PromoName)) y = Text(g, $"   Promo: {_r.PromoName}", _small, y, Align.Left);
             }
             y = TwoColumns(g, _r.IsReturn ? "REFUND" : "TOTAL", _currencies.Primary.Format(_r.Total), _big, y + 2);
             if (_r.UsdRate > 1 && !string.Equals(_r.PrimaryCode, "USD", StringComparison.OrdinalIgnoreCase))

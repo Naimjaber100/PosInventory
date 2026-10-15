@@ -60,23 +60,34 @@ namespace Inventory.Repositories
         /// <summary>
         /// Saves and finishes a sale: stock out, payments, change. heldSaleId = the recalled held sale it replaces.
         /// customerId = the client of an on-account (unpaid) payment: that amount is added to what they owe.
+        /// invoiceDiscount = the whole invoice discount; promoDiscount = the part of it an invoice promotion gave (promoName).
+        /// The lines go with their whole discount, and what their promotions gave of it.
         /// All or nothing.
         /// </summary>
         public async Task<SaleResultModel> SaveSaleAsync(IEnumerable<PosLine> lines, IEnumerable<SalePaymentModel> payments,
-            decimal invoiceDiscount, int? heldSaleId, int userId, int? customerId = null)
+            decimal invoiceDiscount, int? heldSaleId, int userId, int? customerId = null,
+            decimal promoDiscount = 0, string? promoName = null)
         {
             var parameters = new DynamicParameters();
             parameters.Add("p_user_id", userId);
             parameters.Add("p_customer_id", customerId, DbType.Int32);
-            parameters.Add("p_lines", new JsonbParameter(ToJsonLines(lines)));
+            parameters.Add("p_lines", new JsonbParameter(lines.Select(l => new
+            {
+                l.PackagingId, l.Quantity, l.UnitPrice, Discount = l.TotalDiscount, l.PromoDiscount, l.PromoName,
+            }).ToList()));
             parameters.Add("p_payments", new JsonbParameter(payments.Where(p => p.Amount > 0)));
             parameters.Add("p_invoice_discount", invoiceDiscount);
             parameters.Add("p_held_sale_id", heldSaleId, DbType.Int32);
+            parameters.Add("p_promo_discount", promoDiscount);
+            parameters.Add("p_promo_name", promoName, DbType.String);
 
             return (await GetSingleAsync<SaleResultModel>(Procedures.SaveSale, parameters))!;
         }
 
-        /// <summary>Parks the sale to finish later; replaceHeldId = the held sale it replaces. Returns the held sale id.</summary>
+        /// <summary>
+        /// Parks the sale to finish later; replaceHeldId = the held sale it replaces. Returns the held sale id.
+        /// The promotions are not kept: they are worked out again when the sale is recalled.
+        /// </summary>
         public async Task<int> HoldSaleAsync(IEnumerable<PosLine> lines, int? replaceHeldId, int userId)
         {
             var parameters = new DynamicParameters();
@@ -156,7 +167,8 @@ namespace Inventory.Repositories
             await ExecuteAsync(Procedures.AddAudit, parameters);
         }
 
-        // { packaging_id, quantity, unit_price, discount } as fn_save_sale / fn_hold_sale expect
+        // { packaging_id, quantity, unit_price, discount } as fn_hold_sale / fn_save_return expect.
+        // Without the promotions: a held sale gets them again when it is recalled, a return has none.
         private static IEnumerable<object> ToJsonLines(IEnumerable<PosLine> lines) =>
             lines.Select(l => new { l.PackagingId, l.Quantity, l.UnitPrice, l.Discount }).ToList();
     }

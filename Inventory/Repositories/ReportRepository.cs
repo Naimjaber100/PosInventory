@@ -69,5 +69,37 @@ namespace Inventory.Repositories
 
             return (await GetListAsync<SalesUnpaidRow>(Procedures.ReportSalesUnpaid, parameters)).ToList();
         }
+
+        /// <summary>Report 7: one row per posted purchase in the period, in date order. supplierId null = every supplier.</summary>
+        public async Task<List<PurchasesByInvoiceRow>> GetPurchasesByInvoiceAsync(DateTime from, DateTime to, int? supplierId)
+        {
+            var parameters = new DynamicParameters();
+            parameters.Add("p_from", from.Date, DbType.Date);
+            parameters.Add("p_to", to.Date, DbType.Date);
+            parameters.Add("p_supplier_id", supplierId, DbType.Int32);
+
+            return (await GetListAsync<PurchasesByInvoiceRow>(Procedures.ReportPurchasesByInvoice, parameters)).ToList();
+        }
+
+        /// <summary>Report 8: one row per item bought in the period, biggest cost first. supplierId null = every supplier.</summary>
+        public async Task<List<PurchasesByItemRow>> GetPurchasesByItemAsync(DateTime from, DateTime to, int? supplierId)
+        {
+            var parameters = new DynamicParameters();
+            parameters.Add("p_from", from.Date, DbType.Date);
+            parameters.Add("p_to", to.Date, DbType.Date);
+            parameters.Add("p_supplier_id", supplierId, DbType.Int32);
+
+            return (await GetListAsync<PurchasesByItemRow>(Procedures.ReportPurchasesByItem, parameters)).ToList();
+        }
+
+        /// <summary>Report 9: one row per supplier with purchases or payments in the period, biggest purchases first.</summary>
+        public async Task<List<PurchasesBySupplierRow>> GetPurchasesBySupplierAsync(DateTime from, DateTime to)
+        {
+            var parameters = new DynamicParameters();
+            parameters.Add("p_from", from.Date, DbType.Date);
+            parameters.Add("p_to", to.Date, DbType.Date);
+
+            return (await GetListAsync<PurchasesBySupplierRow>(Procedures.ReportPurchasesBySupplier, parameters)).ToList();
+        }
     }
 }
