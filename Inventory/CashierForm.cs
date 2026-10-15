@@ -708,6 +708,7 @@ namespace Inventory
             }
         }
 
+
         // Weight label: the weight is the quantity at the item's price.
         // Price label: a weighed item gets the weight that this price buys (price / price per kg);
         //              an item sold by piece is added once at the price on the label.
