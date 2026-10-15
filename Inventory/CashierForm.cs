@@ -22,6 +22,9 @@ namespace Inventory
     // shows in Disc. with the promotion's name next to the item, an invoice promotion shows under the total.
     // Not on a return, and not on a line with a discount typed by the cashier (F5).
     //
+    // Scans and searches look in the item list kept in memory (PosItemCache) and go to the database only for
+    // an item that is not there. The database tells the list at once when a price or an item changes (LISTEN / NOTIFY).
+    //
     // Keys: F1 barcode box, F2 qty, F3 unpaid sale, F4 return, F5 line discount, F6 invoice discount, F7 sales list, F8 hold, F9 recall,
     //       F10 void sale, F12 pay, +/- quantity, Del delete line, Up/Down choose line, Esc clear box.
     public partial class CashierForm : Form
@@ -76,6 +79,7 @@ namespace Inventory
             // The grid is bound first: it must know a new line before the promotions change it
             linesGrid.DataSource = _lines;
             linesGrid.CellFormatting += linesGrid_CellFormatting;
+            FormClosed += CashierForm_FormClosed;
             _lines.ListChanged += (_, _) =>
             {
                 if (_applyingPromotions) return;
@@ -106,7 +110,65 @@ namespace Inventory
             await LoadPromotionsAsync();
             try { await ReceiptSettings.LoadAsync(); }
             catch { /* no receipt settings: sales still work, nothing prints */ }
+            await LoadItemListAsync();
         }
+
+        #region Item list in memory
+
+        // Scans and name searches look in the item list in memory first (PosItemCache), the database only when
+        // an item is not there. Until the list is loaded every search goes to the database, as before.
+        // A change of price or item is pushed by the database (LISTEN / NOTIFY) and read at once; the timer is
+        // only the safety net for a notification lost while the network was down.
+        private readonly PosItemCache _items = PosItemCache.Shared;
+        private System.Windows.Forms.Timer? _itemsTimer;
+        private static readonly TimeSpan ItemsRefreshAge = TimeSpan.FromMinutes(5);
+
+        private async Task LoadItemListAsync()
+        {
+            try
+            {
+                var wasLoaded = _items.IsLoaded;
+                var started = DateTime.Now;
+                await _items.LoadAsync();
+                if (!wasLoaded && statusLabel.Text == "Ready")
+                    ShowStatus($"Ready  ·  {_items.Count:#,0} items in memory for fast scanning ({(DateTime.Now - started).TotalSeconds:0.0} s)", Color.Gainsboro);
+                else await RefreshItemListAsync();
+            }
+            catch (Exception ex)
+            {
+                ShowStatus("Item list not in memory (scans ask the database): " + (ex is Npgsql.PostgresException pg ? pg.MessageText : ex.Message), Color.Khaki);
+            }
+
+            if (_items.IsLoaded) _items.StartListening();
+
+            // Every few minutes as well (only when the screen is not saving a sale)
+            _itemsTimer ??= new System.Windows.Forms.Timer { Interval = (int)ItemsRefreshAge.TotalMilliseconds };
+            _itemsTimer.Tick -= itemsTimer_Tick;
+            _itemsTimer.Tick += itemsTimer_Tick;
+            _itemsTimer.Start();
+        }
+
+        private async void itemsTimer_Tick(object? sender, EventArgs e)
+        {
+            if (_saving) return;
+            await RefreshItemListAsync();
+        }
+
+        // Quiet: a failed refresh keeps the list as it is, the next one tries again
+        private async Task RefreshItemListAsync()
+        {
+            try
+            {
+                if (!_items.IsLoaded) await _items.LoadAsync();
+                else await _items.RefreshAsync();
+                if (_items.IsLoaded) _items.StartListening();   // the first load failed earlier: listen now
+            }
+            catch { /* the database is not reachable now: scans still use the list in memory */ }
+        }
+
+        private void CashierForm_FormClosed(object? sender, FormClosedEventArgs e) => _itemsTimer?.Dispose();
+
+        #endregion
 
         #region Receipt printing
 
@@ -676,7 +738,13 @@ namespace Inventory
 
             try
             {
-                var matches = (await _saleRepository.FindItemAsync(text)).ToList();
+                // In memory first; not there (a new item, or the list is still loading): the database
+                var matches = _items.Find(text);
+                if (matches.Count == 0)
+                {
+                    matches = (await _saleRepository.FindItemAsync(text)).ToList();
+                    _items.Remember(matches);
+                }
                 PosItemModel? item;
                 if (matches.Count == 0)
                 {
@@ -716,7 +784,7 @@ namespace Inventory
         {
             try
             {
-                var item = await _saleRepository.FindScaleItemAsync(label.ItemCode);
+                var item = _items.FindScaleItem(label.ItemCode) ?? await _saleRepository.FindScaleItemAsync(label.ItemCode);
                 if (item == null)
                 {
                     System.Media.SystemSounds.Hand.Play();
@@ -1346,6 +1414,7 @@ namespace Inventory
             UpdateInfo();
             UpdateTotals();
             if (DateTime.Now - _promotionsLoadedAt > PromotionsAge) _ = LoadPromotionsAsync(betweenSales: true);
+            _ = RefreshItemListAsync();   // the stock of what was just sold, and any price changed meanwhile
         }
 
         private void CashierForm_FormClosing(object? sender, FormClosingEventArgs e)

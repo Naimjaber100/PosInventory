@@ -15,6 +15,8 @@ DROP FUNCTION IF EXISTS public.fn_sales_by_user(integer, date, date);
 DROP FUNCTION IF EXISTS public.fn_sale_get_lines(integer);
 
 DROP FUNCTION IF EXISTS public.fn_save_sale(integer, jsonb, jsonb, integer, integer, numeric, integer);   -- before promotions
+DROP FUNCTION IF EXISTS public.fn_pos_item_list(timestamptz);
+DROP VIEW IF EXISTS public.v_pos_items;
 
 -- What is still unpaid of an on-account sale (set by fn_save_sale; Database/customer_payment_functions.sql settles it)
 ALTER TABLE public.sales_invoices ADD COLUMN IF NOT EXISTS due_lbp numeric(18,2) NOT NULL DEFAULT 0;
@@ -261,6 +263,114 @@ BEGIN
            OR pk.barcode LIKE v_pattern || '%')
     ORDER BY p.name, pk.factor, pk.packaging_id
     LIMIT greatest(coalesce(p_limit, 30), 1);
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- The cashier keeps every sellable item in memory (PosItemCache.cs), so a scan or a name search does not
+-- go to the database. Same columns and rules as fn_pos_find_item, plus:
+--   product_name = what the name search looks in (as fn_pos_find_item: the product name)
+--   scale_code   = on the one packaging fn_pos_find_scale_item would give for a scale label, else NULL
+--   sellable     = false: the item can no longer be sold, the cashier drops it
+--   as_of        = the database time of this answer: the next call asks for what changed since then
+-- p_since NULL = everything that can be sold (the first load).
+-- p_since set  = every packaging of the items that changed since then: name, price, barcode, scale code,
+--                active (products / product_packaging updated_at), stock (stock_movements), and bundles
+--                whose components changed. The cashier asks a little before its last as_of, so a sale that
+--                was still being saved at that moment is not missed.
+-- ---------------------------------------------------------------------------
+CREATE INDEX IF NOT EXISTS ix_products_updated ON public.products (updated_at);
+CREATE INDEX IF NOT EXISTS ix_packaging_updated ON public.product_packaging (updated_at);
+CREATE INDEX IF NOT EXISTS ix_packaging_created ON public.product_packaging (created_at);
+CREATE INDEX IF NOT EXISTS ix_stock_movements_date ON public.stock_movements (movement_date);
+
+-- Every packaging with the item data the cashier needs; sellable = it can be sold now.
+-- scale_code only on the packaging a scale label gives (fn_pos_find_scale_item: piece first, then the default).
+-- Filtering it on product_id or sellable goes into the view (they are what the window is partitioned by).
+CREATE VIEW public.v_pos_items AS
+    SELECT r.packaging_id, r.product_id,
+           fn_item_description(r.name::text, r.size::text, r.color::text, r.pack_name::text) AS item_name,
+           r.pack_name AS packaging_name, r.barcode, r.sale_price, r.factor, r.is_weighted, r.base_unit,
+           CASE WHEN r.product_type = 2
+                THEN (SELECT min(floor(c.stock_qty / b.quantity)) FROM bundle_items b
+                      JOIN products c ON c.product_id = b.component_product_id WHERE b.bundle_product_id = r.product_id)
+                ELSE r.stock_qty END AS stock_qty,
+           r.name AS product_name,
+           CASE WHEN r.sellable AND r.product_type = 1 AND r.scale_code IS NOT NULL
+                     AND row_number() OVER (PARTITION BY r.product_id, r.sellable
+                                            ORDER BY (r.factor = 1) DESC, r.is_default DESC, r.packaging_id) = 1
+                THEN r.scale_code END AS scale_code,
+           r.sellable
+    FROM (SELECT pk.packaging_id, p.product_id, p.name, p.size, p.color, pk.name AS pack_name, pk.barcode,
+                 pk.sale_price, pk.factor, pk.is_default, p.is_weighted, p.base_unit, p.product_type, p.scale_code,
+                 p.stock_qty,
+                 (pk.is_active AND pk.can_sell AND p.is_active AND p.product_type IN (1, 2)) AS sellable
+          FROM product_packaging pk
+          JOIN products p ON p.product_id = pk.product_id) r;
+
+-- Tells every open cashier at once that items changed (PostgreSQL NOTIFY on channel 'pos_items'; the cashier
+-- LISTENs on it and reads the change with fn_pos_item_list). Sent when the change is committed, once per statement:
+--   payload 'changed'           = items or prices changed: read what changed since the last time
+--   payload 'deleted:12,13,...' = these packagings were deleted (a refresh cannot see a deleted row)
+--   payload 'reload'            = too many deleted to list: read the whole list again
+CREATE OR REPLACE FUNCTION public.fn_pos_items_notify()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_ids text;
+BEGIN
+    IF TG_OP = 'DELETE' AND TG_TABLE_NAME = 'product_packaging' THEN
+        SELECT string_agg(o.packaging_id::text, ',') INTO v_ids FROM old_rows o;
+        IF v_ids IS NOT NULL THEN
+            PERFORM pg_notify('pos_items', CASE WHEN length(v_ids) > 7000 THEN 'reload' ELSE 'deleted:' || v_ids END);
+        END IF;
+    ELSE
+        PERFORM pg_notify('pos_items', 'changed');
+    END IF;
+    RETURN NULL;
+END $$;
+
+DROP TRIGGER IF EXISTS trg_products_pos_notify ON public.products;
+CREATE TRIGGER trg_products_pos_notify AFTER INSERT OR UPDATE ON public.products
+    FOR EACH STATEMENT EXECUTE FUNCTION fn_pos_items_notify();
+DROP TRIGGER IF EXISTS trg_packaging_pos_notify ON public.product_packaging;
+CREATE TRIGGER trg_packaging_pos_notify AFTER INSERT OR UPDATE ON public.product_packaging
+    FOR EACH STATEMENT EXECUTE FUNCTION fn_pos_items_notify();
+DROP TRIGGER IF EXISTS trg_packaging_pos_notify_delete ON public.product_packaging;
+CREATE TRIGGER trg_packaging_pos_notify_delete AFTER DELETE ON public.product_packaging
+    REFERENCING OLD TABLE AS old_rows
+    FOR EACH STATEMENT EXECUTE FUNCTION fn_pos_items_notify();
+DROP TRIGGER IF EXISTS trg_bundle_items_pos_notify ON public.bundle_items;
+CREATE TRIGGER trg_bundle_items_pos_notify AFTER INSERT OR UPDATE OR DELETE ON public.bundle_items
+    FOR EACH STATEMENT EXECUTE FUNCTION fn_pos_items_notify();
+
+CREATE OR REPLACE FUNCTION public.fn_pos_item_list(p_since timestamptz DEFAULT NULL)
+RETURNS TABLE (
+    packaging_id integer, product_id integer, item_name text, packaging_name varchar, barcode varchar,
+    sale_price numeric, factor numeric, is_weighted boolean, base_unit varchar, stock_qty numeric,
+    product_name varchar, scale_code varchar, sellable boolean, as_of timestamptz)
+LANGUAGE plpgsql STABLE
+AS $$
+DECLARE
+    v_ids integer[];
+BEGIN
+    -- The first load: everything that can be sold
+    IF p_since IS NULL THEN
+        RETURN QUERY SELECT v.*, now() FROM v_pos_items v WHERE v.sellable;
+        RETURN;
+    END IF;
+
+    -- A refresh: the items that changed (each through its index), and the bundles made of them
+    SELECT array_agg(DISTINCT x.id) INTO v_ids FROM (
+        SELECT p.product_id AS id FROM products p WHERE p.updated_at > p_since
+        UNION ALL SELECT pk.product_id FROM product_packaging pk WHERE pk.updated_at > p_since
+        UNION ALL SELECT pk.product_id FROM product_packaging pk WHERE pk.created_at > p_since
+        UNION ALL SELECT m.product_id FROM stock_movements m WHERE m.movement_date > p_since
+    ) x;
+    IF v_ids IS NULL THEN RETURN; END IF;
+    v_ids := v_ids || ARRAY(SELECT b.bundle_product_id FROM bundle_items b WHERE b.component_product_id = ANY (v_ids));
+
+    RETURN QUERY SELECT v.*, now() FROM v_pos_items v WHERE v.product_id = ANY (v_ids);
 END $$;
 
 -- ---------------------------------------------------------------------------

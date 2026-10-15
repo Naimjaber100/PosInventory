@@ -17,6 +17,9 @@ namespace Inventory.Models
         [DisplayName("Unit")] public string BaseUnit { get; set; } = string.Empty;
         [DisplayName("In stock")] public decimal StockQty { get; set; }   // in base units
 
+        /// <summary>The product name the name search looks in (fn_pos_item_list; empty from the other functions).</summary>
+        [Browsable(false)] public string ProductName { get; set; } = string.Empty;
+
         /// <summary>A copy sold at another price (open-price quick buttons).</summary>
         public PosItemModel WithPrice(decimal price)
         {
@@ -24,5 +27,13 @@ namespace Inventory.Models
             copy.SalePrice = price;
             return copy;
         }
+    }
+
+    // Row returned by fn_pos_item_list: the cashier's item list in memory (PosItemCache)
+    public class PosItemRow : PosItemModel
+    {
+        [Browsable(false)] public string? ScaleCode { get; set; }   // set on the packaging a scale label gives
+        [Browsable(false)] public bool Sellable { get; set; } = true;
+        [Browsable(false)] public DateTime AsOf { get; set; }       // database time of the answer
     }
 }

@@ -19,6 +19,18 @@ namespace Inventory.Repositories
             return await GetListAsync<PosItemModel>(Procedures.PosFindItem, parameters);
         }
 
+        /// <summary>
+        /// The cashier's item list (PosItemCache): since null = every sellable packaging; otherwise every packaging of
+        /// the items changed since then (with Sellable = false for one that can no longer be sold).
+        /// </summary>
+        public async Task<List<PosItemRow>> GetItemListAsync(DateTimeOffset? since)
+        {
+            var parameters = new DynamicParameters();
+            parameters.Add("p_since", since, DbType.DateTimeOffset);
+
+            return (await GetListAsync<PosItemRow>(Procedures.PosItemList, parameters)).ToList();
+        }
+
         /// <summary>The item of a scale label by its scale code (null when no scale product has it).</summary>
         public async Task<PosItemModel?> FindScaleItemAsync(string scaleCode)
         {

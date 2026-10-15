@@ -37,6 +37,17 @@ namespace Inventory.Repositories
             return used;
         }
 
+        /// <summary>
+        /// A connection of its own that stays open, e.g. to LISTEN for database notifications (PosItemCache).
+        /// Not opened yet. Keepalive: a broken network is noticed within a minute.
+        /// </summary>
+        internal static NpgsqlConnection NewLongLivedConnection()
+        {
+            var connectionString = WithoutGssEncryption(AppConfig.ConnectionString
+                ?? throw new InvalidOperationException("Connection string 'DefaultConnection' is not configured in appsettings.json."));
+            return new NpgsqlConnection(new NpgsqlConnectionStringBuilder(connectionString) { KeepAlive = 30, Pooling = false }.ConnectionString);
+        }
+
         // An open connection that knows who is logged in: database triggers record this user
         // as created_by / updated_by / posted_by and in audit_log (Database/user_tracking.sql).
         private async Task<NpgsqlConnection> OpenAsync()

@@ -60,6 +60,7 @@ namespace Inventory.Repositories
 
         // Cashier / sales (Database/pos_functions.sql; fn_save_sale, fn_hold_sale, fn_current_rate were already in the database)
         public const string PosFindItem = "fn_pos_find_item";
+        public const string PosItemList = "fn_pos_item_list";   // the cashier's item list in memory (PosItemCache)
         public const string PosGetHeldSales = "fn_pos_get_held_sales";
         public const string PosGetHeldLines = "fn_pos_get_held_lines";
         public const string PosDeleteHeld = "fn_pos_delete_held";
