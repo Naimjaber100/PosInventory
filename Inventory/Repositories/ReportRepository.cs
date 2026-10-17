@@ -92,6 +92,12 @@ namespace Inventory.Repositories
             return (await GetListAsync<PurchasesByItemRow>(Procedures.ReportPurchasesByItem, parameters)).ToList();
         }
 
+        /// <summary>Report 10: what the stock costs and would sell for now, one row per item with stock, biggest cost first.</summary>
+        public async Task<List<StockValueRow>> GetStockValueAsync()
+        {
+            return (await GetListAsync<StockValueRow>(Procedures.ReportStockValue)).ToList();
+        }
+
         /// <summary>Report 9: one row per supplier with purchases or payments in the period, biggest purchases first.</summary>
         public async Task<List<PurchasesBySupplierRow>> GetPurchasesBySupplierAsync(DateTime from, DateTime to)
         {

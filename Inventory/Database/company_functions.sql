@@ -1,4 +1,4 @@
--- The company (Settings > Company): name, address, email, mobile number, VAT number.
+-- The company (Settings > Company): name, address, email, mobile number, VAT number, logo.
 -- Exactly one record: company_id is always 1, it is created here and cannot be deleted.
 -- The name is shown on the login screen, the cashier screen and the back office.
 -- Safe to re-run.
@@ -21,6 +21,11 @@ VALUES (1,
         nullif(trim((SELECT value FROM settings WHERE key = 'store_phone')), ''))
 ON CONFLICT (company_id) DO NOTHING;
 
+-- The logo printed at the top of the receipt (Settings > Company): a PNG, already made small and grey by the
+-- app (CompanyLogo.cs), so it is a few KB. NULL = no logo. Read on its own (fn_company_get_logo), not with
+-- fn_company_get, which every screen calls for the name.
+ALTER TABLE public.company ADD COLUMN IF NOT EXISTS logo bytea;
+
 -- It cannot be deleted
 CREATE OR REPLACE FUNCTION public.trg_company_keep()
 RETURNS trigger
@@ -36,6 +41,27 @@ CREATE TRIGGER trg_company_keep BEFORE DELETE OR TRUNCATE ON public.company
 
 DROP FUNCTION IF EXISTS public.fn_company_get();
 DROP FUNCTION IF EXISTS public.fn_company_save(text, text, text, text, text);
+DROP FUNCTION IF EXISTS public.fn_company_get_logo();
+DROP FUNCTION IF EXISTS public.fn_company_set_logo(bytea);
+
+-- The logo (NULL = none)
+CREATE OR REPLACE FUNCTION public.fn_company_get_logo()
+RETURNS bytea
+LANGUAGE sql STABLE
+AS $$
+    SELECT c.logo FROM company c WHERE c.company_id = 1;
+$$;
+
+-- Sets the logo; NULL removes it. At most 1 MB (the app sends a few KB).
+CREATE OR REPLACE FUNCTION public.fn_company_set_logo(p_logo bytea)
+RETURNS void
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF length(p_logo) > 1048576 THEN RAISE EXCEPTION 'The logo is too big (1 MB at most).'; END IF;
+    UPDATE company SET logo = p_logo WHERE company_id = 1;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Save the company first.'; END IF;
+END $$;
 
 -- The company record
 CREATE OR REPLACE FUNCTION public.fn_company_get()

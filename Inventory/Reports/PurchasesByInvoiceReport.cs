@@ -12,11 +12,12 @@ namespace Inventory.Reports
         private static readonly Color Blue = Color.FromArgb(29, 78, 160);
         private static readonly Color Dark = Color.FromArgb(22, 32, 43);
         private static readonly Color Orange = Color.FromArgb(217, 119, 6);
+        private static readonly Color Red = Color.FromArgb(192, 57, 43);
 
         public override string Title => "Purchases by invoice";
 
         public override string Description =>
-            "Every posted purchase with its supplier, total, what was paid and what is still owed. Drafts are not counted.";
+            "Every posted purchase and return to supplier, with what was paid and what is still owed. Returns are negative; drafts are not counted.";
 
         public override bool UsesCashierFilter => false;
 
@@ -31,22 +32,27 @@ namespace Inventory.Reports
             var rows = new List<PurchasesByInvoiceRow>(invoices) { total };
 
             var money = filter.Currencies;
-            var biggest = invoices.MaxBy(i => i.TotalLbp);
-            var unpaid = invoices.Where(i => i.OwedLbp > 0).ToList();
+            var purchases = invoices.Where(i => !i.IsReturn).ToList();
+            var returns = invoices.Where(i => i.IsReturn).ToList();
+            var bought = purchases.Sum(i => i.TotalLbp);
+            var biggest = purchases.MaxBy(i => i.TotalLbp);
+            var unpaid = purchases.Where(i => i.OwedLbp > 0).ToList();
             var suppliers = invoices.Select(i => i.Supplier ?? string.Empty).Distinct().Count();
             return new ReportResult
             {
                 Rows = rows,
                 Cards = new()
                 {
-                    new("TOTAL PURCHASES", money.FormatPrimary(total.TotalLbp), Blue,
-                        money.FormatSecond(total.TotalLbp) is { Length: > 0 } s ? s : null),
-                    new("PURCHASES", $"{invoices.Count:#,0}", Dark,
-                        invoices.Count > 0 ? $"average {money.FormatPrimary(invoices.Average(i => i.TotalLbp))}  ·  {suppliers} supplier(s)" : null),
+                    new("NET PURCHASES", money.FormatPrimary(total.TotalLbp), Blue,
+                        returns.Count > 0 ? $"bought {money.FormatPrimary(bought)}, returns subtracted"
+                        : money.FormatSecond(total.TotalLbp) is { Length: > 0 } s ? s : null),
+                    new("PURCHASES", $"{purchases.Count:#,0}", Dark,
+                        purchases.Count > 0 ? $"average {money.FormatPrimary(purchases.Average(i => i.TotalLbp))}  ·  {suppliers} supplier(s)" : null),
+                    new("RETURNS", money.FormatPrimary(-returns.Sum(i => i.TotalLbp)), returns.Count > 0 ? Red : Dark,
+                        $"{returns.Count:#,0} return(s) to suppliers"),
                     new("PAID", money.FormatPrimary(total.PaidLbp), Green,
-                        total.TotalLbp > 0 ? $"{total.PaidLbp / total.TotalLbp * 100:0.#}% of the purchases" : null),
+                        bought > 0 ? $"{total.PaidLbp / bought * 100:0.#}% of the purchases" : null),
                     new("STILL OWED", money.FormatPrimary(total.OwedLbp), total.OwedLbp > 0 ? Orange : Dark, $"{unpaid.Count:#,0} purchase(s) not fully paid"),
-                    new("DISCOUNTS", money.FormatPrimary(total.DiscountLbp), Green, "given by the suppliers"),
                     new("BIGGEST PURCHASE", biggest != null ? money.FormatPrimary(biggest.TotalLbp) : "-", Blue,
                         biggest != null ? $"{biggest.PurchaseNo}  ·  {biggest.Supplier ?? "no supplier"}" : null),
                 },
@@ -71,7 +77,7 @@ namespace Inventory.Reports
             if (grid.Columns[nameof(PurchasesByInvoiceRow.TotalText)] is { } own) own.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
             if (grid.Columns[nameof(PurchasesByInvoiceRow.PurchaseNo)] is { } no) no.FillWeight = 120;
             if (grid.Columns[nameof(PurchasesByInvoiceRow.Supplier)] is { } supplier) supplier.FillWeight = 120;
-            foreach (var narrow in new[] { nameof(PurchasesByInvoiceRow.ItemCount), nameof(PurchasesByInvoiceRow.Status) })
+            foreach (var narrow in new[] { nameof(PurchasesByInvoiceRow.ItemCount), nameof(PurchasesByInvoiceRow.Status), nameof(PurchasesByInvoiceRow.TypeText) })
                 if (grid.Columns[narrow] is { } c) c.FillWeight = 60;
             if (grid.Columns[nameof(PurchasesByInvoiceRow.InvoiceDate)] is { } date) date.FillWeight = 85;
             foreach (var bold in new[] { nameof(PurchasesByInvoiceRow.TotalLbp), nameof(PurchasesByInvoiceRow.OwedLbp) })
@@ -87,6 +93,11 @@ namespace Inventory.Reports
                 style.BackColor = style.SelectionBackColor = Color.FromArgb(232, 240, 254);
                 style.ForeColor = style.SelectionForeColor = Dark;
                 style.Font = new Font(style.Font ?? SystemFonts.DefaultFont, FontStyle.Bold);
+                return;
+            }
+            if (invoice.IsReturn)
+            {
+                style.ForeColor = style.SelectionForeColor = Red;
                 return;
             }
             if (column.DataPropertyName is nameof(PurchasesByInvoiceRow.OwedLbp) or nameof(PurchasesByInvoiceRow.Status))

@@ -7,6 +7,8 @@ namespace Inventory
 {
     // Add a purchase invoice (no id) or open an existing one (id).
     // Drafts can be changed; posted / cancelled invoices open read-only.
+    // Type: Purchase, or Return to supplier (the items that go back, added like a purchase): posting a return takes
+    // them out of stock and lowers what we owe the supplier. A draft can still change its type.
     public partial class PurchaseEditForm : Form
     {
         private readonly PurchaseRepository _purchaseRepository = new();
@@ -16,10 +18,36 @@ namespace Inventory
         private bool _loading = true;   // true while filling the form, so it does not count as a change
         private bool _dirty;
         private readonly ErrorProvider _errors = new() { BlinkStyle = ErrorBlinkStyle.NeverBlink };
+        private readonly ComboBox _typeCombo;
+        private readonly Label _typeLabel;
+        private bool _showingType;
+
+        private void TypeLayout()
+        {
+            _typeCombo.Width = notesText.Width / 2;
+            _typeCombo.Location = new Point(notesText.Right - _typeCombo.Width, supplierInvoiceText.Top);
+            _typeLabel.Location = new Point(_typeCombo.Left - _typeLabel.Width - 8, statusLabel.Top);
+        }
 
         public PurchaseEditForm(int? purchaseId = null)
         {
             InitializeComponent();
+
+            // Type, beside the status, ending where the notes box ends (placed when the window has its size: TypeLayout)
+            _typeLabel = new Label { Text = "Type", AutoSize = true };
+            headerGroup.Controls.Add(_typeLabel);
+            _typeCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
+            _typeCombo.Items.AddRange(new object[] { "Purchase", "Return to supplier" });
+            _typeCombo.SelectedIndex = 0;
+            _typeCombo.SelectedIndexChanged += (_, _) =>
+            {
+                if (_showingType) return;
+                _header.DocType = _typeCombo.SelectedIndex == 1 ? PurchaseDocType.Return : PurchaseDocType.Purchase;
+                ShowDocType();
+                MarkDirty();
+            };
+            headerGroup.Controls.Add(_typeCombo);
+
             AppTheme.Apply(this);
             _purchaseId = purchaseId;
             _errors.ContainerControl = this;
@@ -57,12 +85,13 @@ namespace Inventory
 
         private async void PurchaseEditForm_Load(object? sender, EventArgs e)
         {
+            TypeLayout();
             if (_purchaseId == null)
             {
-                Text = "New purchase";
                 statusValue.Text = "New";
                 await LoadCurrenciesAsync(null);
                 await LoadSuppliersAsync(null);
+                ShowDocType();
                 ActiveControl = supplierCombo;
                 _loading = false;
                 return;
@@ -113,6 +142,24 @@ namespace Inventory
             }
         }
 
+        // The type box and the captions of a purchase or a return (what it is, what posting does)
+        private void ShowDocType()
+        {
+            var isReturn = _header.IsReturn;
+            _showingType = true;
+            _typeCombo.SelectedIndex = isReturn ? 1 : 0;
+            _showingType = false;
+            _typeCombo.ForeColor = isReturn ? Color.Firebrick : SystemColors.ControlText;
+            _typeCombo.Enabled = _header.IsDraft && _header.ReturnOfId == null;
+
+            headerGroup.Text = !isReturn ? "Invoice"
+                : _header.ReturnOfNo != null ? $"Return to supplier  ·  of purchase {_header.ReturnOfNo}" : "Return to supplier";
+            postButton.Text = isReturn ? "Save && post return" : "Save && post";
+            aiButton.Visible = voiceButton.Visible = !isReturn;   // reading a supplier's invoice is for purchases
+            if (_purchaseId == null) Text = isReturn ? "New return to supplier" : "New purchase";
+            UpdateTotals();
+        }
+
         private void FillHeader()
         {
             numberValue.Text = _header.PurchaseNo ?? "(given when posted)";
@@ -124,9 +171,12 @@ namespace Inventory
             discountInput.Value = Math.Min(_header.Discount, discountInput.Maximum);
             statusValue.Text = _header.Status switch { 0 => "Draft", 1 => "Posted", _ => "Cancelled" };
 
+            var what = _header.IsReturn ? "return to supplier" : "purchase";
             Text = _header.IsDraft
-                ? $"Edit purchase (draft #{_header.PurchaseId})"
-                : $"Purchase {_header.PurchaseNo} - {statusValue.Text} (read-only)";
+                ? $"Edit {what} (draft #{_header.PurchaseId})"
+                : $"{(_header.IsReturn ? "Return" : "Purchase")} {_header.PurchaseNo} - {statusValue.Text} (read-only)";
+            ShowDocType();
+            if (_header.ReturnOfId != null) supplierCombo.Enabled = addSupplierButton.Visible = false;
 
             if (IsReadOnly)
             {
@@ -559,7 +609,7 @@ namespace Inventory
             totalValue.ForeColor = total < 0 ? Color.Firebrick : SystemColors.ControlText;
             // In another currency: what it makes in the primary one (the supplier balance and the costs use this)
             totalLbpValue.Text = currency.IsPrimary || CurrentRate <= 0 || total == 0 ? string.Empty : $"= {_currencies.Primary.Format(total * CurrentRate)}";
-            itemsGroup.Text = $"Items ({_lines.Count} line(s), {_lines.Sum(l => l.Quantity):#,0.###} qty)";
+            itemsGroup.Text = $"{(_header.IsReturn ? "Items going back" : "Items")} ({_lines.Count} line(s), {_lines.Sum(l => l.Quantity):#,0.###} qty)";
         }
 
         private void linesGrid_DataBindingComplete(object? sender, DataGridViewBindingCompleteEventArgs e)
@@ -620,10 +670,13 @@ namespace Inventory
                 return;
             }
 
-            if (post && MessageBox.Show(this,
-                    $"Post this purchase ({sub - _header.Discount:#,0.##})?\n\n" +
-                    "The items are added to stock and the average cost is updated.\nA posted purchase cannot be changed.",
-                    "Post purchase", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+            var question = _header.IsReturn
+                ? $"Post this return to {_header.SupplierName} ({sub - _header.Discount:#,0.##})?\n\n" +
+                  "The items are taken out of stock and what we owe the supplier goes down.\nA posted return cannot be changed."
+                : $"Post this purchase ({sub - _header.Discount:#,0.##})?\n\n" +
+                  "The items are added to stock and the average cost is updated.\nA posted purchase cannot be changed.";
+            if (post && MessageBox.Show(this, question, _header.IsReturn ? "Post return" : "Post purchase",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
                 return;
 
             try

@@ -187,7 +187,8 @@ namespace Inventory
         #endregion
 
         /// <summary>
-        /// As fn_pos_find_item: an exact barcode gives that one packaging; otherwise every word must be in the product
+        /// As fn_pos_find_item: an exact barcode gives that one packaging (also when the label has the check digit the
+        /// item was saved without, or a leading 0 more or less); otherwise every word must be in the product
         /// name, or the barcode starts with the text. By name, then pack size. Empty when nothing matches (or not loaded).
         /// </summary>
         public List<PosItemModel> Find(string search, int limit = 30)
@@ -195,6 +196,9 @@ namespace Inventory
             search = search.Trim();
             if (!IsLoaded || search.Length == 0) return new();
             if (_byBarcode.TryGetValue(search, out var exact)) return new() { exact };
+            // The same label written another way (saved without its check digit, a leading 0): Barcodes
+            foreach (var variant in Barcodes.Variants(search))
+                if (_byBarcode.TryGetValue(variant, out var same)) return new() { same };
 
             var words = search.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
             return _byPackaging.Values

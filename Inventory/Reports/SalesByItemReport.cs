@@ -97,5 +97,52 @@ namespace Inventory.Reports
         }
 
         public override bool IsTotalRow(object row) => row is SalesByItemRow { IsTotal: true };
+
+        public override bool HasSlip => true;
+
+        // For the 80 mm printer, per item: "qty unit x average price   net sales", then "Cost ...   Profit ... (margin)".
+        // The average price is what one unit sold for after discounts (net sales / net qty).
+        public override Printing.ReportSlip ToSlip(ReportResult result, ReportFilter filter, string company)
+        {
+            var primary = filter.Currencies.Primary;
+            string N(decimal amount) => Math.Round(amount, primary.Decimals).ToString(primary.Decimals == 0 ? "#,0" : "#,0." + new string('0', primary.Decimals));
+            static string Qty(decimal? qty) => (qty ?? 0).ToString(qty % 1 == 0 ? "#,0" : "#,0.###");
+
+            var items = result.Rows.OfType<SalesByItemRow>().Where(i => !i.IsTotal).ToList();
+            var total = result.Rows.OfType<SalesByItemRow>().FirstOrDefault(i => i.IsTotal) ?? SalesByItemRow.Total(items);
+            var rows = items.Select(i =>
+            {
+                var price = i.NetQty is { } q and not 0 ? $" x {N(i.NetSales / q)}" : string.Empty;
+                var returned = i.QtyReturned > 0 ? $"  (ret {Qty(i.QtyReturned)})" : string.Empty;
+                return new Printing.SlipRow(
+                    i.ItemName,
+                    $"   {Qty(i.NetQty)} {i.BaseUnit}{price}{returned}",
+                    N(i.NetSales),
+                    $"   Cost {N(i.Cost)}",
+                    $"Profit {N(i.Profit)}" + (i.Margin is { } m ? $" ({m:0.#}%)" : string.Empty));
+            }).ToList();
+
+            var totals = new List<Printing.SlipTotal> { new("Items", $"{items.Count:#,0}") };
+            if (total.Discounts != 0)
+            {
+                totals.Add(new("Gross", N(total.Gross)));
+                totals.Add(new("Discounts", "-" + N(total.Discounts)));
+            }
+            totals.Add(new("NET SALES", primary.Format(total.NetSales), Strong: true));
+            totals.Add(new("Cost", N(total.Cost)));
+            totals.Add(new("PROFIT", primary.Format(total.Profit), Strong: true));
+            if (total.Margin is { } margin) totals.Add(new("Margin", $"{margin:0.#}%"));
+
+            return new Printing.ReportSlip
+            {
+                Company = company,
+                Title = Title,
+                Header = { filter.PeriodText, filter.UserId == null ? "All cashiers" : $"Cashier: {filter.UserName}", $"Amounts in {primary.Code}" },
+                ColumnsLeft = "Qty x avg price",
+                ColumnsRight = "Net sales",
+                Rows = rows,
+                Totals = totals,
+            };
+        }
     }
 }

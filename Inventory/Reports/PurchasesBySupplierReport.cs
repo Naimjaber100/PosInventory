@@ -16,7 +16,7 @@ namespace Inventory.Reports
         public override string Title => "Purchases by supplier";
 
         public override string Description =>
-            "What was bought from and paid to each supplier in the period, biggest first, and what we owe each one now.";
+            "What was bought from, sent back to and paid to each supplier in the period, biggest first, and what we owe each one now.";
 
         public override bool UsesCashierFilter => false;
 
@@ -27,24 +27,26 @@ namespace Inventory.Reports
             var suppliers = await new ReportRepository().GetPurchasesBySupplierAsync(filter.From, filter.To);
             var total = PurchasesBySupplierRow.TotalOf(suppliers);
             foreach (var supplier in suppliers)
-                supplier.Share = total.Purchases > 0 ? Math.Round(supplier.Purchases / total.Purchases * 100, 1) : null;
+                supplier.Share = total.Net > 0 ? Math.Round(supplier.Net / total.Net * 100, 1) : null;
             var rows = new List<PurchasesBySupplierRow>(suppliers) { total };
 
             var money = filter.Currencies;
-            var top = suppliers.FirstOrDefault(s => s.Purchases > 0);
+            var top = suppliers.FirstOrDefault(s => s.Net > 0);
             var mostOwed = suppliers.Where(s => s.OwedNow > 0).MaxBy(s => s.OwedNow);
             return new ReportResult
             {
                 Rows = rows,
                 Cards = new()
                 {
-                    new("TOTAL PURCHASES", money.FormatPrimary(total.Purchases), Blue,
-                        money.FormatSecond(total.Purchases) is { Length: > 0 } s ? s : null),
+                    new("NET PURCHASES", money.FormatPrimary(total.Net), Blue,
+                        total.Returns > 0 ? $"bought {money.FormatPrimary(total.Purchases)}, returns subtracted"
+                        : money.FormatSecond(total.Net) is { Length: > 0 } s ? s : null),
                     new("SUPPLIERS", $"{suppliers.Count(s => s.Purchases > 0):#,0}", Dark, $"{total.InvoiceCount:#,0} purchase(s)"),
+                    new("RETURNS", money.FormatPrimary(-total.Returns), total.Returns > 0 ? Color.FromArgb(192, 57, 43) : Dark, "sent back to suppliers"),
                     new("PAID IN PERIOD", money.FormatPrimary(total.Paid), Green, null),
                     new("WE OWE NOW", money.FormatPrimary(total.OwedNow ?? 0), total.OwedNow > 0 ? Orange : Dark, "to all these suppliers, for all time"),
                     new("TOP SUPPLIER", top?.Supplier ?? "-", Blue,
-                        top != null ? $"{money.FormatPrimary(top.Purchases)}  ·  {top.Share:0.#}% of purchases" : null),
+                        top != null ? $"{money.FormatPrimary(top.Net)}  ·  {top.Share:0.#}% of purchases" : null),
                     new("MOST OWED", mostOwed?.Supplier ?? "-", Orange,
                         mostOwed != null ? money.FormatPrimary(mostOwed.OwedNow ?? 0) : "nothing owed"),
                 },
@@ -69,7 +71,7 @@ namespace Inventory.Reports
             if (grid.Columns[nameof(PurchasesBySupplierRow.Supplier)] is { } name) name.FillWeight = 150;
             foreach (var narrow in new[] { nameof(PurchasesBySupplierRow.InvoiceCount), nameof(PurchasesBySupplierRow.Share) })
                 if (grid.Columns[narrow] is { } c) c.FillWeight = 60;
-            foreach (var bold in new[] { nameof(PurchasesBySupplierRow.Purchases), nameof(PurchasesBySupplierRow.OwedNow) })
+            foreach (var bold in new[] { nameof(PurchasesBySupplierRow.Net), nameof(PurchasesBySupplierRow.OwedNow) })
                 if (grid.Columns[bold] is { } c) c.DefaultCellStyle.Font = new Font(grid.Font, FontStyle.Bold);
         }
 
@@ -87,6 +89,8 @@ namespace Inventory.Reports
             if (supplier.SupplierId == null) style.ForeColor = style.SelectionForeColor = Color.Gray;
             else if (column.DataPropertyName == nameof(PurchasesBySupplierRow.OwedNow) && supplier.OwedNow > 0)
                 style.ForeColor = style.SelectionForeColor = Orange;
+            else if (column.DataPropertyName == nameof(PurchasesBySupplierRow.Returns) && supplier.Returns > 0)
+                style.ForeColor = style.SelectionForeColor = Color.FromArgb(192, 57, 43);
         }
 
         public override bool IsTotalRow(object row) => row is PurchasesBySupplierRow { IsTotal: true };

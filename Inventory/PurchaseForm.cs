@@ -3,7 +3,8 @@ using Inventory.Repositories;
 
 namespace Inventory
 {
-    // Purchase invoices on top; the item lines of the selected invoice below
+    // Purchase invoices on top; the item lines of the selected invoice below.
+    // Returns to the supplier (Type: Return on the purchase screen, numbered PR-...) are red in the list.
     public partial class PurchaseForm : Form
     {
         private readonly PurchaseRepository _purchaseRepository = new();
@@ -17,6 +18,17 @@ namespace Inventory
         public PurchaseForm()
         {
             InitializeComponent();
+
+            invoicesGrid.DataBindingComplete += (_, _) =>
+            {
+                if (invoicesGrid.Columns[nameof(PurchaseInvoiceModel.PurchaseNo)] is { } number) number.MinimumWidth = 125;
+            };
+            invoicesGrid.CellFormatting += (_, e) =>
+            {
+                if (e.RowIndex >= 0 && e.CellStyle != null && invoicesGrid.Rows[e.RowIndex].DataBoundItem is PurchaseInvoiceModel { IsReturn: true })
+                    e.CellStyle.ForeColor = e.CellStyle.SelectionForeColor = Color.Firebrick;
+            };
+
             AppTheme.Apply(this);
             pageSizeCombo.SelectedItem = _pageSize;
         }

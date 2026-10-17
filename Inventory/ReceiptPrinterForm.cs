@@ -49,6 +49,7 @@ namespace Inventory
             Copies = (int)copiesInput.Value,
             PrintAfterSale = autoCheck.Checked,
             Footer = footerText.Text.Trim(),
+            Logo = ReceiptSettings.Current?.Logo,   // set in Settings > Company, shown in the preview and the test print
         };
 
         private void printerCombo_TextChanged(object? sender, EventArgs e) => ShowPrinterStatus();

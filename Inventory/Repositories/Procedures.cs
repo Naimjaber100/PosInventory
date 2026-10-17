@@ -20,10 +20,13 @@ namespace Inventory.Repositories
         public const string ReportPurchasesByInvoice = "fn_report_purchases_by_invoice";
         public const string ReportPurchasesByItem = "fn_report_purchases_by_item";
         public const string ReportPurchasesBySupplier = "fn_report_purchases_by_supplier";
+        public const string ReportStockValue = "fn_report_stock_value";
 
         // Company, one record (Database/company_functions.sql)
         public const string GetCompany = "fn_company_get";
         public const string SaveCompany = "fn_company_save";
+        public const string GetCompanyLogo = "fn_company_get_logo";
+        public const string SetCompanyLogo = "fn_company_set_logo";
 
         // Users (Database/user_functions.sql)
         public const string GetAllUsers = "fn_user_get_all";
@@ -55,8 +58,7 @@ namespace Inventory.Repositories
         public const string GetPurchaseLines = "fn_purchase_get_lines";
         public const string GetPurchaseById = "fn_purchase_get_by_id";
         public const string FindPurchasePackaging = "fn_purchase_find_packaging";
-        public const string SavePurchase = "fn_purchase_save";
-        public const string MatchPurchasePackaging = "fn_purchase_match_packaging";
+        public const string SavePurchase = "fn_purchase_save";        public const string MatchPurchasePackaging = "fn_purchase_match_packaging";
 
         // Cashier / sales (Database/pos_functions.sql; fn_save_sale, fn_hold_sale, fn_current_rate were already in the database)
         public const string PosFindItem = "fn_pos_find_item";

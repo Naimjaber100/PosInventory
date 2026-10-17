@@ -6,7 +6,7 @@ namespace Inventory.Printing
 {
     // Receipt printer of THIS computer (Settings > Receipt printer). Kept in the settings table under the
     // computer's name, so each cashier PC has its own printer and an update of the program does not lose it.
-    // The footer ("receipt_footer") is the same for every computer.
+    // The footer ("receipt_footer") and the company logo are the same for every computer.
     public sealed class ReceiptSettings
     {
         public string PrinterName { get; set; } = string.Empty;   // empty = no printer yet: sales work, nothing prints
@@ -14,6 +14,9 @@ namespace Inventory.Printing
         public int Copies { get; set; } = 1;
         public int PaperWidthMm { get; set; } = 80;               // 80 or 58
         public string Footer { get; set; } = "Thank you for shopping with us";
+
+        /// <summary>The company logo for the top of the receipt (Settings > Company; CompanyLogo), null = none. Same for every computer.</summary>
+        public byte[]? Logo { get; set; }
 
         /// <summary>Set when the cashier screen opens; null until then.</summary>
         public static ReceiptSettings? Current { get; private set; }
@@ -37,6 +40,8 @@ namespace Inventory.Printing
                 PaperWidthMm = await repo.GetSettingAsync(Key("width"), "80") == "58" ? 58 : 80,
             };
             settings.Footer = await repo.GetSettingAsync("receipt_footer", settings.Footer) ?? string.Empty;
+            try { settings.Logo = await new CompanyRepository().GetLogoAsync(); }
+            catch { /* company_functions.sql not applied yet: receipts print without a logo */ }
             Current = settings;
             return settings;
         }

@@ -308,7 +308,8 @@ AS $$
 $$;
 
 -- ===========================================================================
--- Purchase reports (7 to 9). Only posted purchases (status 1); drafts and cancelled ones are left out.
+-- Purchase reports (7 to 9). Only posted documents (status 1); drafts and cancelled ones are left out.
+-- Returns to the supplier (doc_type 2) count against the purchases: they are negative (by invoice) or subtracted.
 -- A purchase is entered in its supplier's currency: amounts are converted to the primary currency with the
 -- rate kept on the invoice (currency_rate). The invoice discount is shared over the lines by their amount,
 -- so the cost of the items adds up to the invoices. Days are purchase_invoices.invoice_date (the invoice's date).
@@ -317,29 +318,36 @@ $$;
 DROP FUNCTION IF EXISTS public.fn_report_purchases_by_invoice(date, date, integer);
 
 -- ---------------------------------------------------------------------------
--- 7. Purchases by invoice: one row per posted purchase from p_from to p_to, in date order.
--- p_supplier_id NULL = every supplier.
+-- 7. Purchases by invoice: one row per posted purchase and return from p_from to p_to, in date order.
+-- p_supplier_id NULL = every supplier. A return (doc_type 2) has negative amounts, so the columns add up to the net.
 --   total         = the invoice total in its own currency (currency)
 --   discount_lbp  = the invoice discount, in the primary currency
 --   total_lbp     = the invoice total in the primary currency (what we owe the supplier for it)
---   paid_lbp      = what was paid of it; owed_lbp = what is still owed of it
+--   paid_lbp      = what was paid of it; owed_lbp = what is still owed of it (0 on a return)
+--   return_of     = for a return, the purchase the goods came on
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.fn_report_purchases_by_invoice(p_from date, p_to date, p_supplier_id integer DEFAULT NULL)
-RETURNS TABLE (purchase_id integer, purchase_no varchar, supplier_invoice_no varchar, invoice_date date,
+RETURNS TABLE (purchase_id integer, purchase_no varchar, doc_type smallint, supplier_invoice_no varchar, invoice_date date,
                supplier varchar, item_count bigint, currency text, total numeric,
-               discount_lbp numeric, total_lbp numeric, paid_lbp numeric, owed_lbp numeric, entered_by varchar)
+               discount_lbp numeric, total_lbp numeric, paid_lbp numeric, owed_lbp numeric, entered_by varchar,
+               return_of varchar)
 LANGUAGE sql STABLE
 AS $$
-    SELECT pi.purchase_id, pi.purchase_no, pi.supplier_invoice_no, pi.invoice_date,
+    SELECT pi.purchase_id, pi.purchase_no, pi.doc_type, pi.supplier_invoice_no, pi.invoice_date,
            s.name,
            (SELECT count(*) FROM purchase_lines pl WHERE pl.purchase_id = pi.purchase_id),
-           trim(pi.currency), pi.total,
-           round(pi.discount * pi.currency_rate, 2),
-           pi.total_lbp, pi.paid_lbp, greatest(pi.total_lbp - pi.paid_lbp, 0),
-           u.full_name
+           trim(pi.currency), pi.total * x.sign,
+           round(pi.discount * pi.currency_rate, 2) * x.sign,
+           pi.total_lbp * x.sign,
+           CASE WHEN pi.doc_type = 1 THEN pi.paid_lbp ELSE 0 END,
+           CASE WHEN pi.doc_type = 1 THEN greatest(pi.total_lbp - pi.paid_lbp, 0) ELSE 0 END,
+           u.full_name,
+           ro.purchase_no
     FROM purchase_invoices pi
+    CROSS JOIN LATERAL (SELECT CASE WHEN pi.doc_type = 2 THEN -1 ELSE 1 END AS sign) x
     LEFT JOIN suppliers s ON s.supplier_id = pi.supplier_id
     LEFT JOIN users u ON u.user_id = pi.user_id
+    LEFT JOIN purchase_invoices ro ON ro.purchase_id = pi.return_of_id
     WHERE pi.status = 1
       AND pi.invoice_date BETWEEN p_from AND p_to
       AND (p_supplier_id IS NULL OR pi.supplier_id = p_supplier_id)
@@ -349,24 +357,25 @@ $$;
 DROP FUNCTION IF EXISTS public.fn_report_purchases_by_item(date, date, integer);
 
 -- ---------------------------------------------------------------------------
--- 8. Purchases by item: one row per item bought from p_from to p_to, biggest cost first.
+-- 8. Purchases by item: one row per item bought or sent back from p_from to p_to, biggest net cost first.
 -- p_supplier_id NULL = every supplier. Quantities are in the item's base unit (a box of 12 counts as 12);
 -- unit costs are per base unit, in the primary currency, after the invoice discount.
---   cost          = what the item cost on the invoices of the period
---   avg_unit_cost = cost / qty;  last_unit_cost = on its latest invoice of the period
---   min / max     = the lowest and highest unit cost it was bought at in the period
+--   qty_bought / qty_returned / qty = bought, sent back to the supplier, the difference
+--   cost          = what the item cost on the purchases less what the returns gave back
+--   avg_unit_cost = cost / qty;  last_unit_cost = on its latest purchase of the period
+--   min / max     = the lowest and highest unit cost it was bought at in the period (purchases only)
 --   avg_cost_now  = the item's average cost now (products.avg_cost), to compare
 --   suppliers     = who it was bought from
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.fn_report_purchases_by_item(p_from date, p_to date, p_supplier_id integer DEFAULT NULL)
 RETURNS TABLE (product_id integer, item_name text, category_name varchar, base_unit varchar,
-               qty numeric, cost numeric, avg_unit_cost numeric, last_unit_cost numeric,
+               qty_bought numeric, qty_returned numeric, qty numeric, cost numeric, avg_unit_cost numeric, last_unit_cost numeric,
                min_unit_cost numeric, max_unit_cost numeric, avg_cost_now numeric,
                invoice_count bigint, last_bought date, suppliers text)
 LANGUAGE sql STABLE
 AS $$
     WITH lines AS (
-        SELECT pl.product_id, pi.purchase_id, pi.invoice_date, pi.supplier_id, pl.base_qty,
+        SELECT pl.product_id, pi.purchase_id, pi.doc_type, pi.invoice_date, pi.supplier_id, pl.base_qty,
                pl.line_total * pi.currency_rate
                    * CASE WHEN pi.sub_total > 0 THEN pi.total / pi.sub_total ELSE 1 END AS cost
         FROM purchase_invoices pi
@@ -377,10 +386,15 @@ AS $$
           AND pl.base_qty > 0
     ),
     per_item AS (
-        SELECT l.product_id, sum(l.base_qty) AS qty, sum(l.cost) AS cost,
-               min(l.cost / l.base_qty) AS min_unit_cost, max(l.cost / l.base_qty) AS max_unit_cost,
-               count(DISTINCT l.purchase_id) AS invoice_count, max(l.invoice_date) AS last_bought,
-               (array_agg(l.cost / l.base_qty ORDER BY l.invoice_date DESC, l.purchase_id DESC))[1] AS last_unit_cost,
+        SELECT l.product_id,
+               coalesce(sum(l.base_qty) FILTER (WHERE l.doc_type = 1), 0) AS qty_bought,
+               coalesce(sum(l.base_qty) FILTER (WHERE l.doc_type = 2), 0) AS qty_returned,
+               sum(CASE WHEN l.doc_type = 2 THEN -l.cost ELSE l.cost END) AS cost,
+               min(l.cost / l.base_qty) FILTER (WHERE l.doc_type = 1) AS min_unit_cost,
+               max(l.cost / l.base_qty) FILTER (WHERE l.doc_type = 1) AS max_unit_cost,
+               count(DISTINCT l.purchase_id) FILTER (WHERE l.doc_type = 1) AS invoice_count,
+               max(l.invoice_date) FILTER (WHERE l.doc_type = 1) AS last_bought,
+               (array_agg(l.cost / l.base_qty ORDER BY l.invoice_date DESC, l.purchase_id DESC) FILTER (WHERE l.doc_type = 1))[1] AS last_unit_cost,
                string_agg(DISTINCT s.name, ', ') AS suppliers
         FROM lines l
         LEFT JOIN suppliers s ON s.supplier_id = l.supplier_id
@@ -389,8 +403,10 @@ AS $$
     SELECT p.product_id,
            p.name || coalesce(' ' || nullif(p.size, ''), '') || coalesce(' ' || nullif(p.color, ''), ''),
            c.name, p.base_unit,
-           i.qty, round(i.cost, 2), round(i.cost / i.qty, 2), round(i.last_unit_cost, 2),
-           round(i.min_unit_cost, 2), round(i.max_unit_cost, 2), round(p.avg_cost, 2),
+           i.qty_bought, i.qty_returned, i.qty_bought - i.qty_returned,
+           round(i.cost, 2),
+           CASE WHEN i.qty_bought - i.qty_returned > 0 THEN round(i.cost / (i.qty_bought - i.qty_returned), 2) END,
+           round(i.last_unit_cost, 2), round(i.min_unit_cost, 2), round(i.max_unit_cost, 2), round(p.avg_cost, 2),
            i.invoice_count, i.last_bought, i.suppliers
     FROM per_item i
     JOIN products p ON p.product_id = i.product_id
@@ -401,20 +417,26 @@ $$;
 DROP FUNCTION IF EXISTS public.fn_report_purchases_by_supplier(date, date);
 
 -- ---------------------------------------------------------------------------
--- 9. Purchases by supplier: one row per supplier with purchases or payments from p_from to p_to,
--- biggest purchases first. Purchases posted without a supplier are one row (supplier_id NULL).
+-- 9. Purchases by supplier: one row per supplier with purchases, returns or payments from p_from to p_to,
+-- biggest net purchases first. Purchases posted without a supplier are one row (supplier_id NULL).
 --   purchases    = what was bought from them in the period (primary currency)
+--   returns      = what was sent back to them in the period
+--   net          = purchases - returns
 --   paid         = what we paid them in the period (supplier_payments)
 --   owed_now     = what we owe them now, for all time (suppliers.balance_lbp)
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.fn_report_purchases_by_supplier(p_from date, p_to date)
 RETURNS TABLE (supplier_id integer, supplier varchar, phone varchar, invoice_count bigint, purchases numeric,
-               discounts numeric, paid numeric, last_purchase date, owed_now numeric)
+               returns numeric, net numeric, discounts numeric, paid numeric, last_purchase date, owed_now numeric)
 LANGUAGE sql STABLE
 AS $$
     WITH bought AS (
-        SELECT pi.supplier_id, count(*) AS invoice_count, sum(pi.total_lbp) AS purchases,
-               sum(round(pi.discount * pi.currency_rate, 2)) AS discounts, max(pi.invoice_date) AS last_purchase
+        SELECT pi.supplier_id,
+               count(*) FILTER (WHERE pi.doc_type = 1) AS invoice_count,
+               coalesce(sum(pi.total_lbp) FILTER (WHERE pi.doc_type = 1), 0) AS purchases,
+               coalesce(sum(pi.total_lbp) FILTER (WHERE pi.doc_type = 2), 0) AS returns,
+               coalesce(sum(round(pi.discount * pi.currency_rate, 2)) FILTER (WHERE pi.doc_type = 1), 0) AS discounts,
+               max(pi.invoice_date) FILTER (WHERE pi.doc_type = 1) AS last_purchase
         FROM purchase_invoices pi
         WHERE pi.status = 1 AND pi.invoice_date BETWEEN p_from AND p_to
         GROUP BY pi.supplier_id
@@ -432,11 +454,47 @@ AS $$
         SELECT y.supplier_id FROM paid y
     )
     SELECT ids.supplier_id, coalesce(s.name, '(no supplier)'::varchar), s.phone,
-           coalesce(b.invoice_count, 0), coalesce(b.purchases, 0), coalesce(b.discounts, 0), coalesce(y.paid, 0),
+           coalesce(b.invoice_count, 0), coalesce(b.purchases, 0), coalesce(b.returns, 0),
+           coalesce(b.purchases, 0) - coalesce(b.returns, 0),
+           coalesce(b.discounts, 0), coalesce(y.paid, 0),
            b.last_purchase, s.balance_lbp
     FROM ids
     LEFT JOIN bought b ON b.supplier_id IS NOT DISTINCT FROM ids.supplier_id
     LEFT JOIN paid y ON y.supplier_id = ids.supplier_id
     LEFT JOIN suppliers s ON s.supplier_id = ids.supplier_id
-    ORDER BY coalesce(b.purchases, 0) DESC, s.name NULLS LAST;
+    ORDER BY coalesce(b.purchases, 0) - coalesce(b.returns, 0) DESC, s.name NULLS LAST;
+$$;
+DROP FUNCTION IF EXISTS public.fn_report_stock_value();
+
+-- ---------------------------------------------------------------------------
+-- 10. Stock value: what the stock costs and what it would sell for, now, one row per stock item that has stock
+-- (above or below zero), biggest cost first. Bundles have no stock of their own and are left out.
+--   stock_qty   = in the item's base unit (pcs, kg...)
+--   avg_cost    = average cost of one base unit (products.avg_cost, updated by purchases)
+--   sale_price  = price of one base unit: the single-unit packaging (factor 1) that can be sold, else the default
+--                 packaging (its price / its pack size), else the smallest one; 0 = no price yet
+--   total_cost  = stock_qty x avg_cost;  total_sale = stock_qty x sale_price;  profit = total_sale - total_cost
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.fn_report_stock_value()
+RETURNS TABLE (product_id integer, item_name text, category_name varchar, base_unit varchar, is_active boolean,
+               stock_qty numeric, avg_cost numeric, sale_price numeric, total_cost numeric, total_sale numeric, profit numeric)
+LANGUAGE sql STABLE
+AS $$
+    SELECT p.product_id,
+           p.name || coalesce(' ' || nullif(p.size, ''), '') || coalesce(' ' || nullif(p.color, ''), ''),
+           c.name, p.base_unit, p.is_active,
+           p.stock_qty, round(p.avg_cost, 2), round(coalesce(pr.price, 0), 2),
+           round(p.stock_qty * p.avg_cost, 2),
+           round(p.stock_qty * coalesce(pr.price, 0), 2),
+           round(p.stock_qty * coalesce(pr.price, 0), 2) - round(p.stock_qty * p.avg_cost, 2)
+    FROM products p
+    LEFT JOIN categories c ON c.category_id = p.category_id
+    LEFT JOIN LATERAL (
+        SELECT pk.sale_price / pk.factor AS price
+        FROM product_packaging pk
+        WHERE pk.product_id = p.product_id AND pk.is_active AND pk.can_sell AND pk.sale_price > 0
+        ORDER BY (pk.factor = 1) DESC, pk.is_default DESC, pk.factor, pk.packaging_id
+        LIMIT 1) pr ON true
+    WHERE p.product_type = 1 AND p.stock_qty <> 0
+    ORDER BY p.stock_qty * p.avg_cost DESC, p.name;
 $$;

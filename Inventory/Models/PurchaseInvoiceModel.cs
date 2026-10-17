@@ -7,6 +7,9 @@ namespace Inventory.Models
     {
         [Browsable(false)] public int PurchaseId { get; set; }
         [DisplayName("Number")] public string? PurchaseNo { get; set; }
+        [Browsable(false)] public short DocType { get; set; } = PurchaseDocType.Purchase;
+        [DisplayName("Type")] public string TypeText => IsReturn ? "Return" : "Purchase";
+        [Browsable(false)] public string? ReturnOfNo { get; set; }
         [DisplayName("Supplier invoice")] public string? SupplierInvoiceNo { get; set; }
         [DisplayName("Date")] public DateTime InvoiceDate { get; set; }
         [Browsable(false)] public int SupplierId { get; set; }
@@ -22,5 +25,7 @@ namespace Inventory.Models
         [DisplayName("Status")] public string StatusText { get; set; } = string.Empty;
         [DisplayName("Created by")] public string? CreatedByName { get; set; }
         [DisplayName("Posted by")] public string? PostedByName { get; set; }
+
+        [Browsable(false)] public bool IsReturn => DocType == PurchaseDocType.Return;
     }
 }

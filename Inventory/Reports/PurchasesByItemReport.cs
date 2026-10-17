@@ -17,7 +17,7 @@ namespace Inventory.Reports
         public override string Title => "Purchases by item";
 
         public override string Description =>
-            "Quantity bought and cost of each item, biggest cost first. Unit costs are per piece / kg, after the invoice discount.";
+            "Quantity bought, sent back and cost of each item, biggest cost first. Unit costs are per piece / kg, after the invoice discount.";
 
         public override bool UsesCashierFilter => false;
 
@@ -69,7 +69,7 @@ namespace Inventory.Reports
                 column.DefaultCellStyle.Format = column.DataPropertyName switch
                 {
                     nameof(PurchasesByItemRow.Share) => "0.0",
-                    nameof(PurchasesByItemRow.Qty) => "#,0.###",
+                    nameof(PurchasesByItemRow.Qty) or nameof(PurchasesByItemRow.QtyBought) or nameof(PurchasesByItemRow.QtyReturned) => "#,0.###",
                     _ => "#,0",
                 };
             }
@@ -94,6 +94,8 @@ namespace Inventory.Reports
             }
             if (column.DataPropertyName is nameof(PurchasesByItemRow.LastUnitCost) or nameof(PurchasesByItemRow.MaxUnitCost) && item.CostWentUp)
                 style.ForeColor = style.SelectionForeColor = Orange;
+            if (column.DataPropertyName == nameof(PurchasesByItemRow.QtyReturned) && item.QtyReturned > 0)
+                style.ForeColor = style.SelectionForeColor = Color.FromArgb(192, 57, 43);
         }
 
         public override bool IsTotalRow(object row) => row is PurchasesByItemRow { IsTotal: true };

@@ -272,13 +272,17 @@ namespace Inventory.Models
 namespace Inventory.Models
 {
     // Report 7 - Purchases by invoice: one row of fn_report_purchases_by_invoice (amounts in the primary currency,
-    // except Total, which is in the invoice's own currency). The report adds a TOTAL row at the end (IsTotal).
+    // except Total, which is in the invoice's own currency; a return to the supplier is negative).
+    // The report adds a TOTAL row at the end (IsTotal): the net.
     public class PurchasesByInvoiceRow
     {
         [Browsable(false)] public int PurchaseId { get; set; }
         [Browsable(false)] public bool IsTotal { get; set; }
+        [Browsable(false)] public short DocType { get; set; } = PurchaseDocType.Purchase;
+        [Browsable(false)] public bool IsReturn => DocType == PurchaseDocType.Return && !IsTotal;
 
         [DisplayName("Purchase")] public string PurchaseNo { get; set; } = string.Empty;
+        [DisplayName("Type")] public string TypeText => IsTotal ? string.Empty : IsReturn ? "Return" : "Purchase";
         [DisplayName("Date")] public DateTime? InvoiceDate { get; set; }
         [DisplayName("Supplier")] public string? Supplier { get; set; }
         [DisplayName("Supplier invoice")] public string? SupplierInvoiceNo { get; set; }
@@ -290,7 +294,8 @@ namespace Inventory.Models
         [DisplayName("Total")] public decimal TotalLbp { get; set; }
         [DisplayName("Paid")] public decimal PaidLbp { get; set; }
         [DisplayName("Still owed")] public decimal OwedLbp { get; set; }
-        [DisplayName("Status")] public string Status => IsTotal ? string.Empty : OwedLbp <= 0 ? "Paid" : PaidLbp > 0 ? "Part paid" : "Unpaid";
+        [DisplayName("Status")] public string Status => IsTotal ? string.Empty : IsReturn ? "Returned" : OwedLbp <= 0 ? "Paid" : PaidLbp > 0 ? "Part paid" : "Unpaid";
+        [Browsable(false)] public string? ReturnOf { get; set; }
         [DisplayName("Entered by")] public string? EnteredBy { get; set; }
 
         /// <summary>The TOTAL row of a list of purchases.</summary>
@@ -318,7 +323,9 @@ namespace Inventory.Models
 
         [DisplayName("Item")] public string ItemName { get; set; } = string.Empty;
         [DisplayName("Category")] public string? CategoryName { get; set; }
-        [DisplayName("Qty bought")] public decimal? Qty { get; set; }
+        [DisplayName("Bought")] public decimal? QtyBought { get; set; }
+        [DisplayName("Returned")] public decimal? QtyReturned { get; set; }   // sent back to the supplier
+        [DisplayName("Net qty")] public decimal? Qty { get; set; }
         [DisplayName("Unit")] public string? BaseUnit { get; set; }
         [DisplayName("Cost")] public decimal Cost { get; set; }
         [DisplayName("% of purchases")] public decimal? Share { get; set; }   // filled by the report
@@ -358,7 +365,9 @@ namespace Inventory.Models
         [DisplayName("Phone")] public string? Phone { get; set; }
         [DisplayName("Purchases #")] public long InvoiceCount { get; set; }
         [DisplayName("Purchases")] public decimal Purchases { get; set; }
-        [DisplayName("% of purchases")] public decimal? Share { get; set; }   // filled by the report
+        [DisplayName("Returns")] public decimal Returns { get; set; }     // sent back to them
+        [DisplayName("Net")] public decimal Net { get; set; }             // purchases - returns
+        [DisplayName("% of purchases")] public decimal? Share { get; set; }   // filled by the report (of the net)
         [DisplayName("Discounts")] public decimal Discounts { get; set; }
         [DisplayName("Paid in period")] public decimal Paid { get; set; }
         [DisplayName("Last purchase")] public DateTime? LastPurchase { get; set; }
@@ -371,10 +380,56 @@ namespace Inventory.Models
             Supplier = $"TOTAL  ({suppliers.Count} suppliers)",
             InvoiceCount = suppliers.Sum(s => s.InvoiceCount),
             Purchases = suppliers.Sum(s => s.Purchases),
+            Returns = suppliers.Sum(s => s.Returns),
+            Net = suppliers.Sum(s => s.Net),
             Share = suppliers.Count > 0 ? 100 : null,
             Discounts = suppliers.Sum(s => s.Discounts),
             Paid = suppliers.Sum(s => s.Paid),
             OwedNow = suppliers.Sum(s => s.OwedNow ?? 0),
         };
+    }
+}
+
+namespace Inventory.Models
+{
+    // Report 10 - Stock value: one row of fn_report_stock_value (as it is now, amounts in the primary currency,
+    // quantities and unit amounts per base unit). The report adds a TOTAL row at the end (IsTotal): items with stock
+    // above zero only; below zero is a count to correct, not stock that is worth something.
+    public class StockValueRow
+    {
+        [Browsable(false)] public int ProductId { get; set; }
+        [Browsable(false)] public bool IsTotal { get; set; }
+        [Browsable(false)] public bool IsActive { get; set; } = true;
+
+        [DisplayName("Item")] public string ItemName { get; set; } = string.Empty;
+        [DisplayName("Category")] public string? CategoryName { get; set; }
+        [DisplayName("In stock")] public decimal? StockQty { get; set; }
+        [DisplayName("Unit")] public string? BaseUnit { get; set; }
+        [DisplayName("Avg cost")] public decimal? AvgCost { get; set; }
+        [DisplayName("Sale price")] public decimal? SalePrice { get; set; }
+        [DisplayName("Total cost")] public decimal TotalCost { get; set; }
+        [DisplayName("Total sale")] public decimal TotalSale { get; set; }
+        [DisplayName("Profit")] public decimal Profit { get; set; }
+        [DisplayName("Margin %")] public decimal? Margin => TotalSale > 0 ? Math.Round(Profit / TotalSale * 100, 1) : null;
+        [DisplayName("% of stock")] public decimal? Share { get; set; }   // of the total cost, filled by the report
+
+        [Browsable(false)] public bool BelowZero => !IsTotal && StockQty < 0;
+        [Browsable(false)] public bool NoPrice => !IsTotal && SalePrice is null or 0;
+        [Browsable(false)] public bool NoCost => !IsTotal && AvgCost is null or 0;
+
+        /// <summary>The TOTAL row: the items with stock above zero.</summary>
+        public static StockValueRow TotalOf(IReadOnlyCollection<StockValueRow> items)
+        {
+            var inStock = items.Where(i => i.StockQty > 0).ToList();
+            return new StockValueRow
+            {
+                IsTotal = true,
+                ItemName = $"TOTAL  ({inStock.Count} items in stock)",
+                TotalCost = inStock.Sum(i => i.TotalCost),
+                TotalSale = inStock.Sum(i => i.TotalSale),
+                Profit = inStock.Sum(i => i.Profit),
+                Share = inStock.Count > 0 ? 100 : null,
+            };
+        }
     }
 }

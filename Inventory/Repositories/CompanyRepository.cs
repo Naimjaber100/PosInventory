@@ -41,5 +41,20 @@ namespace Inventory.Repositories
 
             await ExecuteAsync(Procedures.SaveCompany, parameters);
         }
+
+        /// <summary>The logo for the receipt (a small grey PNG, CompanyLogo), or null when there is none.</summary>
+        public async Task<byte[]?> GetLogoAsync()
+        {
+            return await GetSingleAsync<byte[]?>(Procedures.GetCompanyLogo);
+        }
+
+        /// <summary>Sets the logo; null removes it.</summary>
+        public async Task SetLogoAsync(byte[]? logo)
+        {
+            var parameters = new DynamicParameters();
+            parameters.Add("p_logo", logo, DbType.Binary);
+
+            await ExecuteAsync(Procedures.SetCompanyLogo, parameters);
+        }
     }
 }

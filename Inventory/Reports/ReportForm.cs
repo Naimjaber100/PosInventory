@@ -16,6 +16,7 @@ namespace Inventory.Reports
         private ReportFilter _filter = new();
         private bool _loading = true;
         private List<string> _totals = new();   // the total cards as text, for Print
+        private ReportResult? _result;          // the rows shown, for Print 80 mm
 
         public ReportForm(ReportDefinition report)
         {
@@ -37,6 +38,25 @@ namespace Inventory.Reports
                 filterPanel.Visible = report.UsesCashierFilter || customerCombo.Visible;
             }
             (fromPicker.Value, toPicker.Value) = report.DefaultPeriod;
+
+            // Print 80 mm: the short version on this computer's receipt printer (reports that have one)
+            if (report.HasSlip)
+            {
+                var slipButton = new Button
+                {
+                    Text = "Print 80 mm",
+                    Size = new Size(116, 36),
+                    Margin = printButton.Margin,
+                    BackColor = Color.White,
+                    FlatStyle = FlatStyle.Flat,
+                    UseVisualStyleBackColor = false,
+                };
+                slipButton.FlatAppearance.BorderSize = 0;
+                slipButton.Click += async (_, _) => await PrintSlipAsync();
+                headerButtons.Controls.Add(slipButton);
+                headerButtons.Controls.SetChildIndex(slipButton, headerButtons.Controls.GetChildIndex(printButton) + 1);
+                headerButtons.Width += slipButton.Width + slipButton.Margin.Horizontal;
+            }
         }
 
         private async void ReportForm_Load(object? sender, EventArgs e)
@@ -127,6 +147,7 @@ namespace Inventory.Reports
                 UseWaitCursor = true;
                 var started = DateTime.Now;
                 var result = await _report.LoadAsync(_filter);
+                _result = result;
                 grid.DataSource = result.Rows;
                 ShowCards(result.Cards);
                 _totals = result.Cards.Select(c => $"{c.Caption}: {c.Value}" + (c.Note != null ? $" ({c.Note})" : string.Empty)).ToList();
@@ -260,6 +281,33 @@ namespace Inventory.Reports
             catch (Exception ex)
             {
                 MessageBox.Show(this, "Could not print:\n" + ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        // Print 80 mm: the short version of the rows shown, previewed, then sent to this computer's receipt printer
+        private async Task PrintSlipAsync()
+        {
+            if (_result is not { } result || grid.Rows.Count == 0) { MessageBox.Show(this, "There is nothing to print.", Text, MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+            try
+            {
+                UseWaitCursor = true;
+                var settings = Printing.ReceiptSettings.Current ?? await Printing.ReceiptSettings.LoadAsync();
+                string company;
+                try { company = await new CompanyRepository().GetNameAsync(); } catch { company = string.Empty; }
+                var slip = _report.ToSlip(result, _filter, company);
+                UseWaitCursor = false;
+
+                using var renderer = new Printing.SlipRenderer(slip, _currencies, settings.PaperWidthMm);
+                Printing.ReceiptPrinter.ShowPreview(this, renderer, $"{_report.Title} - {settings.PaperWidthMm} mm",
+                    () => new Printing.SlipRenderer(slip, _currencies, settings.PaperWidthMm), settings);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, "Could not print:\n" + ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                UseWaitCursor = false;
             }
         }
 

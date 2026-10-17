@@ -43,6 +43,13 @@ namespace Inventory.Reports
         public virtual string? DoubleClickHint => null;
 
         public virtual void OnRowDoubleClick(IWin32Window owner, object row, ReportFilter filter) { }
+
+        /// <summary>The report has a short version for the 80 mm receipt printer (the Print 80 mm button shows).</summary>
+        public virtual bool HasSlip => false;
+
+        /// <summary>The short version for the 80 mm receipt printer, from the rows loaded (only when HasSlip).</summary>
+        public virtual Printing.ReportSlip ToSlip(ReportResult result, ReportFilter filter, string company) =>
+            throw new NotSupportedException($"{Title} has no 80 mm version.");
     }
 
     /// <summary>The filters chosen on the report screen.</summary>

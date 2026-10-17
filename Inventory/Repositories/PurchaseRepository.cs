@@ -60,9 +60,9 @@ namespace Inventory.Repositories
         }
 
         /// <summary>
-        /// Saves a new purchase (header.PurchaseId = 0) or updates a draft, with all its lines.
-        /// post = true also posts it (stock and average cost updated, number assigned, no more changes).
-        /// Returns the purchase_id.
+        /// Saves a new purchase or return (header.PurchaseId = 0) or updates a draft, with all its lines.
+        /// post = true also posts it (purchase: stock up and average cost updated; return: stock and the supplier
+        /// balance go down; number assigned, no more changes). Returns the purchase_id.
         /// </summary>
         public async Task<int> SaveAsync(PurchaseHeaderModel header, IEnumerable<PurchaseEditLine> lines, bool post, int userId)
         {
@@ -78,6 +78,8 @@ namespace Inventory.Repositories
             parameters.Add("p_user_id", userId);
             parameters.Add("p_currency", header.Currency, DbType.String);
             parameters.Add("p_currency_rate", header.CurrencyRate, DbType.Decimal);
+            parameters.Add("p_doc_type", (int)header.DocType);
+            parameters.Add("p_return_of_id", header.ReturnOfId, DbType.Int32);
 
             return await GetSingleAsync<int>(Procedures.SavePurchase, parameters);
         }

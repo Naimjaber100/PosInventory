@@ -37,6 +37,25 @@ BEGIN
     END IF;
 END $$;
 
+-- ---------------------------------------------------------------------------
+-- Purchase returns (goods sent back to the supplier): a purchase_invoices row with doc_type 2, numbered PR-...
+-- Same lines, currency and discount as a purchase; posting it does the opposite (fn_post_purchase_return):
+-- the stock goes down, the average cost is taken back, what we owe the supplier goes down.
+-- return_of_id = the posted purchase the goods came on (NULL = a return without its purchase):
+-- then only its items can go back, at most what was bought on it less what earlier returns took.
+-- Amounts on a return are positive, like on a purchase; reports subtract them.
+-- ---------------------------------------------------------------------------
+ALTER TABLE public.purchase_invoices ADD COLUMN IF NOT EXISTS doc_type smallint NOT NULL DEFAULT 1;
+ALTER TABLE public.purchase_invoices ADD COLUMN IF NOT EXISTS return_of_id integer REFERENCES public.purchase_invoices(purchase_id);
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'purchase_invoices_doc_type_check') THEN
+        ALTER TABLE public.purchase_invoices
+            ADD CONSTRAINT purchase_invoices_doc_type_check CHECK (doc_type IN (1, 2) AND (doc_type = 2 OR return_of_id IS NULL));
+    END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS ix_purchase_return_of ON public.purchase_invoices (return_of_id) WHERE return_of_id IS NOT NULL;
+
 CREATE OR REPLACE VIEW public.v_purchase_list AS
  SELECT pi.purchase_id,
     pi.purchase_no,
@@ -47,7 +66,7 @@ CREATE OR REPLACE VIEW public.v_purchase_list AS
     pi.total,                                   -- in the purchase currency
     pi.paid_lbp,
         CASE
-            WHEN pi.status = 1 THEN pi.total_lbp - pi.paid_lbp
+            WHEN pi.status = 1 AND pi.doc_type = 1 THEN pi.total_lbp - pi.paid_lbp
             ELSE NULL::numeric
         END AS balance_lbp,
     CASE WHEN pi.currency = 'USD' THEN pi.total
@@ -57,6 +76,7 @@ CREATE OR REPLACE VIEW public.v_purchase_list AS
             WHEN 2 THEN 'Cancelled'::text
             ELSE
             CASE
+                WHEN pi.doc_type = 2 THEN 'Returned'::text
                 WHEN pi.paid_lbp >= pi.total_lbp THEN 'Paid'::text
                 WHEN pi.paid_lbp > 0::numeric THEN 'Part paid'::text
                 ELSE 'Unpaid'::text
@@ -65,7 +85,9 @@ CREATE OR REPLACE VIEW public.v_purchase_list AS
     pi.status,
     pi.currency,
     pi.currency_rate,
-    round(pi.total * pi.currency_rate, 2) AS total_lbp   -- drafts too (posted: equals pi.total_lbp)
+    round(pi.total * pi.currency_rate, 2) AS total_lbp,  -- drafts too (posted: equals pi.total_lbp)
+    pi.doc_type,                                         -- 1 purchase, 2 return to the supplier
+    pi.return_of_id
    FROM purchase_invoices pi
      LEFT JOIN suppliers s ON s.supplier_id = pi.supplier_id;
 
@@ -73,6 +95,8 @@ DROP FUNCTION IF EXISTS public.fn_purchase_get_all(integer, integer, text);
 DROP FUNCTION IF EXISTS public.fn_purchase_get_lines(integer);
 DROP FUNCTION IF EXISTS public.fn_purchase_get_by_id(integer);
 DROP FUNCTION IF EXISTS public.fn_purchase_find_packaging(text, integer);
+DROP FUNCTION IF EXISTS public.fn_purchase_returnable_lines(integer);   -- no longer used
+DROP FUNCTION IF EXISTS public.fn_purchase_save(integer, integer, text, date, numeric, text, jsonb, boolean, integer, text, numeric);
 
 -- ---------------------------------------------------------------------------
 -- One page of purchase invoices, newest first (built on v_purchase_list).
@@ -91,6 +115,7 @@ RETURNS TABLE (
     total numeric, paid_lbp numeric, balance_lbp numeric, total_usd numeric,
     status smallint, status_text text, item_count bigint, currency text, total_lbp numeric,
     created_by_name varchar, posted_by_name varchar,
+    doc_type smallint, return_of_no varchar,
     total_count bigint)
 LANGUAGE plpgsql STABLE
 AS $$
@@ -114,9 +139,11 @@ BEGIN
            (SELECT count(*) FROM purchase_lines l WHERE l.purchase_id = v.purchase_id),
            v.currency::text, v.total_lbp,
            cu.full_name, pu.full_name,
+           v.doc_type, ro.purchase_no,
            count(*) OVER ()
     FROM v_purchase_list v
     JOIN purchase_invoices pi ON pi.purchase_id = v.purchase_id
+    LEFT JOIN purchase_invoices ro ON ro.purchase_id = v.return_of_id   -- the purchase a return is of
     LEFT JOIN users cu ON cu.user_id = pi.user_id     -- who created it
     LEFT JOIN users pu ON pu.user_id = pi.posted_by   -- who posted it (needs Database/user_tracking.sql)
     WHERE v_pattern IS NULL
@@ -158,24 +185,32 @@ RETURNS TABLE (
     purchase_id integer, purchase_no varchar, supplier_invoice_no varchar, supplier_id integer,
     supplier_name varchar, invoice_date date, exchange_rate numeric, sub_total numeric,
     discount numeric, total numeric, paid_lbp numeric, status smallint, notes varchar,
-    currency text, currency_rate numeric, total_lbp numeric)
+    currency text, currency_rate numeric, total_lbp numeric,
+    doc_type smallint, return_of_id integer, return_of_no varchar)
 LANGUAGE sql STABLE
 AS $$
     SELECT pi.purchase_id, pi.purchase_no, pi.supplier_invoice_no, pi.supplier_id,
            s.name, pi.invoice_date, pi.exchange_rate, pi.sub_total,
            pi.discount, pi.total, pi.paid_lbp, pi.status, pi.notes,
-           pi.currency::text, pi.currency_rate, round(pi.total * pi.currency_rate, 2)
+           pi.currency::text, pi.currency_rate, round(pi.total * pi.currency_rate, 2),
+           pi.doc_type, pi.return_of_id, ro.purchase_no
     FROM purchase_invoices pi
     LEFT JOIN suppliers s ON s.supplier_id = pi.supplier_id
+    LEFT JOIN purchase_invoices ro ON ro.purchase_id = pi.return_of_id
     WHERE pi.purchase_id = p_purchase_id;
 $$;
+
+
 
 -- ---------------------------------------------------------------------------
 -- Packagings that can be purchased (active standard items, can_purchase), for
 -- adding lines. An exact barcode match returns just that packaging; otherwise
--- every word must appear in the item name, or the barcode starts with the text.
--- last_cost = current average cost of one packaging (avg_cost * factor).
+-- every word must appear in the item name, or the text is in the barcode (any part:
+-- "6663" finds 145556663). last_cost = current average cost of one packaging (avg_cost * factor).
 -- ---------------------------------------------------------------------------
+-- Finding a part of a barcode quickly (pg_trgm, as the item name search)
+CREATE INDEX IF NOT EXISTS ix_packaging_barcode_trgm ON public.product_packaging USING gin (barcode gin_trgm_ops);
+
 CREATE OR REPLACE FUNCTION public.fn_purchase_find_packaging(p_search text, p_limit integer DEFAULT 50)
 RETURNS TABLE (
     packaging_id integer, product_id integer, item_name text, packaging_name varchar,
@@ -200,6 +235,18 @@ BEGIN
       AND pk.is_active AND pk.can_purchase AND p.is_active AND p.product_type = 1;
     IF FOUND THEN RETURN; END IF;
 
+    -- The same label written another way: saved without its check digit, or with / without a leading 0
+    -- (fn_barcode_variants, Database/product_functions.sql)
+    RETURN QUERY
+    SELECT pk.packaging_id, p.product_id,
+           fn_item_description(p.name::text, p.size::text, p.color::text, NULL),
+           pk.name, pk.barcode, pk.factor, p.base_unit, p.is_weighted, round(p.avg_cost * pk.factor, 2)
+    FROM product_packaging pk
+    JOIN products p ON p.product_id = pk.product_id
+    WHERE pk.barcode = ANY (fn_barcode_variants(v_search))
+      AND pk.is_active AND pk.can_purchase AND p.is_active AND p.product_type = 1;
+    IF FOUND THEN RETURN; END IF;
+
     v_pattern := replace(replace(replace(v_search, '\', '\\'), '%', '\%'), '_', '\_');
     v_words   := regexp_split_to_array(v_pattern, '\s+');
 
@@ -211,7 +258,7 @@ BEGIN
     JOIN products p ON p.product_id = pk.product_id
     WHERE pk.is_active AND pk.can_purchase AND p.is_active AND p.product_type = 1
       AND (NOT EXISTS (SELECT 1 FROM unnest(v_words) w WHERE p.name NOT ILIKE '%' || w || '%')
-           OR pk.barcode LIKE v_pattern || '%')
+           OR pk.barcode LIKE '%' || v_pattern || '%')
     ORDER BY p.name, pk.factor, pk.packaging_id
     LIMIT greatest(coalesce(p_limit, 50), 1);
 END $$;
@@ -224,6 +271,9 @@ END $$;
 --   updated, the invoice gets its number and can no longer be changed.
 -- p_currency = the invoice currency (NULL = primary); unit costs and the discount are in it.
 -- p_currency_rate = 1 unit of it in the primary currency (NULL = today's rate; always 1 for the primary).
+-- p_doc_type = 2: a return to the supplier (Type on the purchase screen; a draft can still change it).
+-- p_return_of_id = for a return, the posted purchase the goods came on (NULL = without its purchase);
+--   the return then has that purchase's supplier.
 -- Returns the purchase_id. All or nothing.
 -- ---------------------------------------------------------------------------
 DROP FUNCTION IF EXISTS public.fn_purchase_save(integer, integer, text, date, numeric, text, jsonb, boolean, integer);
@@ -238,7 +288,9 @@ CREATE OR REPLACE FUNCTION public.fn_purchase_save(
     p_post                boolean,
     p_user_id             integer,
     p_currency            text    DEFAULT NULL,
-    p_currency_rate       numeric DEFAULT NULL)
+    p_currency_rate       numeric DEFAULT NULL,
+    p_doc_type            integer DEFAULT 1,
+    p_return_of_id        integer DEFAULT NULL)
 RETURNS integer
 LANGUAGE plpgsql
 AS $$
@@ -250,7 +302,24 @@ DECLARE
     v_lines    integer;
     v_currency text;
     v_cur_rate numeric;
+    v_doc_type smallint := coalesce(p_doc_type, 1);
+    v_return_of integer := p_return_of_id;
 BEGIN
+    -- A draft keeps the purchase it is a return of; its type can change until it is posted (not when it is of a purchase)
+    IF v_id IS NOT NULL THEN
+        SELECT CASE WHEN return_of_id IS NULL THEN coalesce(p_doc_type, doc_type) ELSE doc_type END, return_of_id
+        INTO v_doc_type, v_return_of
+        FROM purchase_invoices WHERE purchase_id = v_id;
+        IF NOT FOUND THEN RAISE EXCEPTION 'Purchase invoice % not found.', v_id; END IF;
+    END IF;
+    IF v_doc_type NOT IN (1, 2) THEN RAISE EXCEPTION 'Unknown document type %.', v_doc_type; END IF;
+    IF v_doc_type = 1 AND v_return_of IS NOT NULL THEN RAISE EXCEPTION 'Only a return can be of another purchase.'; END IF;
+    IF v_return_of IS NOT NULL THEN
+        SELECT supplier_id INTO p_supplier_id FROM purchase_invoices
+        WHERE purchase_id = v_return_of AND doc_type = 1 AND status = 1;
+        IF NOT FOUND THEN RAISE EXCEPTION 'Goods can only go back from a posted purchase.'; END IF;
+    END IF;
+
     -- Currency and its rate
     v_currency := upper(coalesce(nullif(trim(p_currency), ''), (SELECT code FROM currencies WHERE is_primary)));
     IF NOT EXISTS (SELECT 1 FROM currencies WHERE code = v_currency AND is_active) THEN
@@ -283,9 +352,9 @@ BEGIN
         IF v_rate IS NULL THEN RAISE EXCEPTION 'Set the exchange rate before entering purchases.'; END IF;
 
         INSERT INTO purchase_invoices (supplier_id, supplier_invoice_no, invoice_date, exchange_rate,
-                                       discount, notes, status, user_id, currency, currency_rate)
+                                       discount, notes, status, user_id, currency, currency_rate, doc_type, return_of_id)
         VALUES (p_supplier_id, nullif(trim(p_supplier_invoice_no), ''), coalesce(p_invoice_date, CURRENT_DATE), v_rate,
-                coalesce(p_discount, 0), nullif(trim(p_notes), ''), 0, p_user_id, v_currency, v_cur_rate)
+                coalesce(p_discount, 0), nullif(trim(p_notes), ''), 0, p_user_id, v_currency, v_cur_rate, v_doc_type, v_return_of)
         RETURNING purchase_id INTO v_id;
     ELSE
         SELECT status INTO v_status FROM purchase_invoices WHERE purchase_id = v_id FOR UPDATE;
@@ -299,7 +368,8 @@ BEGIN
             discount = coalesce(p_discount, 0),
             notes = nullif(trim(p_notes), ''),
             currency = v_currency,
-            currency_rate = v_cur_rate
+            currency_rate = v_cur_rate,
+            doc_type = v_doc_type
         WHERE purchase_id = v_id;
 
         DELETE FROM purchase_lines WHERE purchase_id = v_id;
@@ -365,6 +435,7 @@ DECLARE
 BEGIN
     SELECT * INTO v_inv FROM purchase_invoices WHERE purchase_id = p_purchase_id FOR UPDATE;
     IF NOT FOUND THEN RAISE EXCEPTION 'Purchase invoice % not found.', p_purchase_id; END IF;
+    IF v_inv.doc_type = 2 THEN RETURN fn_post_purchase_return(p_purchase_id, p_user_id); END IF;
     IF v_inv.status <> 0 THEN RAISE EXCEPTION 'This purchase is already posted or cancelled.'; END IF;
     IF NOT EXISTS (SELECT 1 FROM purchase_lines WHERE purchase_id = p_purchase_id) THEN
         RAISE EXCEPTION 'The purchase has no lines.';
@@ -426,6 +497,125 @@ BEGIN
     WHERE purchase_id = p_purchase_id;
 
     UPDATE suppliers SET balance_lbp = balance_lbp + v_total_lbp WHERE supplier_id = v_inv.supplier_id;
+
+    RETURN v_no;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- Posts a draft return to the supplier (called by fn_post_purchase): the opposite of a purchase.
+--   - the stock goes down (refused when there is not enough, unless allow_negative_stock = '1');
+--   - the average cost takes the returned goods out at their cost: (stock x avg - qty x cost) / (stock - qty),
+--     kept as it was when that does not make sense (nothing left, or below 0);
+--   - stock ledger: movement 4 (return to supplier), ref_type 1 (purchase document);
+--   - what we owe the supplier goes down by the return's total (in the primary currency);
+--   - it gets its number PR-... and can no longer be changed.
+-- A return of a purchase (return_of_id) may only take its items, at most what was bought on it less earlier returns.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.fn_post_purchase_return(p_purchase_id integer, p_user_id integer)
+RETURNS text
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_inv       purchase_invoices%ROWTYPE;
+    v_sub       numeric;
+    v_total     numeric;
+    v_total_lbp numeric;
+    v_ratio     numeric;
+    v_no        text;
+    v_bad       text;
+BEGIN
+    SELECT * INTO v_inv FROM purchase_invoices WHERE purchase_id = p_purchase_id AND doc_type = 2 FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Purchase return % not found.', p_purchase_id; END IF;
+    IF v_inv.status <> 0 THEN RAISE EXCEPTION 'This return is already posted or cancelled.'; END IF;
+    IF v_inv.supplier_id IS NULL THEN RAISE EXCEPTION 'Choose the supplier the goods go back to.'; END IF;
+    IF NOT EXISTS (SELECT 1 FROM purchase_lines WHERE purchase_id = p_purchase_id) THEN
+        RAISE EXCEPTION 'The return has no lines.';
+    END IF;
+
+    UPDATE purchase_lines l SET product_id = pk.product_id, factor = pk.factor
+    FROM product_packaging pk
+    WHERE pk.packaging_id = l.packaging_id AND l.purchase_id = p_purchase_id
+      AND (l.product_id <> pk.product_id OR l.factor <> pk.factor);
+
+    SELECT p.name INTO v_bad
+    FROM purchase_lines l JOIN products p ON p.product_id = l.product_id
+    WHERE l.purchase_id = p_purchase_id AND p.product_type <> 1
+    LIMIT 1;
+    IF v_bad IS NOT NULL THEN RAISE EXCEPTION '"%" is not a stock item.', v_bad; END IF;
+
+    SELECT p.name INTO v_bad
+    FROM purchase_lines l JOIN products p ON p.product_id = l.product_id
+    WHERE l.purchase_id = p_purchase_id AND NOT p.is_weighted AND l.base_qty <> trunc(l.base_qty)
+    LIMIT 1;
+    IF v_bad IS NOT NULL THEN RAISE EXCEPTION '"%" goes back in whole units only.', v_bad; END IF;
+
+    -- A return of a purchase: only its items, and not more than is left of them (other returns of it wait: lock it)
+    IF v_inv.return_of_id IS NOT NULL THEN
+        PERFORM 1 FROM purchase_invoices WHERE purchase_id = v_inv.return_of_id FOR UPDATE;
+        SELECT fn_item_description(p.name::text, p.size::text, p.color::text, pk.name::text)
+               || CASE WHEN coalesce(b.qty, 0) = 0 THEN ' was not on that purchase.'
+                       ELSE ': only ' || trim_scale(b.qty - coalesce(r.qty, 0)) || ' left to return.' END
+        INTO v_bad
+        FROM (SELECT packaging_id, sum(quantity) AS qty FROM purchase_lines WHERE purchase_id = p_purchase_id GROUP BY packaging_id) n
+        JOIN product_packaging pk ON pk.packaging_id = n.packaging_id
+        JOIN products p ON p.product_id = pk.product_id
+        LEFT JOIN (SELECT packaging_id, sum(quantity) AS qty FROM purchase_lines WHERE purchase_id = v_inv.return_of_id
+                   GROUP BY packaging_id) b ON b.packaging_id = n.packaging_id
+        LEFT JOIN (SELECT l.packaging_id, sum(l.quantity) AS qty
+                   FROM purchase_invoices r JOIN purchase_lines l ON l.purchase_id = r.purchase_id
+                   WHERE r.return_of_id = v_inv.return_of_id AND r.doc_type = 2 AND r.status = 1
+                   GROUP BY l.packaging_id) r ON r.packaging_id = n.packaging_id
+        WHERE n.qty > coalesce(b.qty, 0) - coalesce(r.qty, 0)
+        LIMIT 1;
+        IF v_bad IS NOT NULL THEN RAISE EXCEPTION '%', v_bad; END IF;
+    END IF;
+
+    -- Totals (never trust what the screen sent)
+    UPDATE purchase_lines SET line_total = round(quantity * unit_cost, 2) WHERE purchase_id = p_purchase_id;
+    SELECT sum(line_total) INTO v_sub FROM purchase_lines WHERE purchase_id = p_purchase_id;
+    v_total := v_sub - v_inv.discount;
+    IF v_total < 0 THEN RAISE EXCEPTION 'The discount is bigger than the return.'; END IF;
+    v_ratio := CASE WHEN v_sub = 0 THEN 1 ELSE v_total / v_sub END;
+    v_total_lbp := round(v_total * v_inv.currency_rate, 2);
+
+    -- Outgoing quantity and cost per base unit in the primary currency, per product
+    IF to_regclass('pg_temp._out') IS NOT NULL THEN DROP TABLE pg_temp._out; END IF;
+    CREATE TEMP TABLE _out ON COMMIT DROP AS
+    SELECT product_id,
+           sum(base_qty) AS qty,
+           sum(line_total) * v_ratio * v_inv.currency_rate / sum(base_qty) AS cost
+    FROM purchase_lines WHERE purchase_id = p_purchase_id
+    GROUP BY product_id;
+
+    PERFORM 1 FROM products WHERE product_id IN (SELECT product_id FROM _out) ORDER BY product_id FOR UPDATE;
+
+    IF fn_setting('allow_negative_stock', '1') <> '1' THEN
+        SELECT fn_item_description(p.name, p.size, p.color, NULL) || ': only ' || trim_scale(p.stock_qty) || ' ' || p.base_unit || ' in stock'
+        INTO v_bad
+        FROM _out o JOIN products p ON p.product_id = o.product_id
+        WHERE p.stock_qty < o.qty LIMIT 1;
+        IF v_bad IS NOT NULL THEN RAISE EXCEPTION '%', v_bad; END IF;
+    END IF;
+
+    UPDATE products p
+    SET avg_cost  = CASE WHEN p.stock_qty - o.qty > 0 AND p.stock_qty * p.avg_cost - o.qty * o.cost > 0
+                         THEN (p.stock_qty * p.avg_cost - o.qty * o.cost) / (p.stock_qty - o.qty)
+                         ELSE p.avg_cost END,
+        stock_qty = p.stock_qty - o.qty,
+        updated_at = now()
+    FROM _out o WHERE p.product_id = o.product_id;
+
+    INSERT INTO stock_movements (product_id, movement_type, quantity, unit_cost, balance_after, ref_type, ref_id, user_id)
+    SELECT o.product_id, 4, -o.qty, o.cost, p.stock_qty, 1, p_purchase_id, p_user_id
+    FROM _out o JOIN products p ON p.product_id = o.product_id;
+
+    v_no := coalesce(v_inv.purchase_no, fn_next_doc_no('PR'));
+
+    UPDATE purchase_invoices
+    SET purchase_no = v_no, sub_total = v_sub, total = v_total, total_lbp = v_total_lbp, status = 1, posted_at = now()
+    WHERE purchase_id = p_purchase_id;
+
+    UPDATE suppliers SET balance_lbp = balance_lbp - v_total_lbp WHERE supplier_id = v_inv.supplier_id;
 
     RETURN v_no;
 END $$;

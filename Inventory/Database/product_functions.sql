@@ -3,6 +3,35 @@
 -- Apply:  psql -h localhost -U postgres -d Pos -f product_functions.sql
 
 -- ---------------------------------------------------------------------------
+-- Barcodes: other ways the same label can be written, for a scan that does not match exactly
+-- (used by fn_purchase_find_packaging and fn_pos_find_item; the cashier's memory list does the same, PosItemCache).
+--   - without its last digit, when that digit is the right check digit (EAN-13 / EAN-8 / UPC-A, GS1):
+--     the item was saved without it, the scanner sends it;
+--   - without a leading 0 (EAN-13 "0" + UPC-A) and with one (the other way round).
+-- Only digits, 7 or more; anything else has no other way.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.fn_barcode_check_digit(p_digits text)
+RETURNS integer
+LANGUAGE sql IMMUTABLE
+AS $$
+    -- GS1: from the right, the digits are weighted 3, 1, 3, 1...
+    SELECT (10 - sum(substr(reverse(p_digits), i, 1)::int * CASE WHEN i % 2 = 1 THEN 3 ELSE 1 END) % 10) % 10
+    FROM generate_series(1, length(p_digits)) i;
+$$;
+
+CREATE OR REPLACE FUNCTION public.fn_barcode_variants(p_code text)
+RETURNS text[]
+LANGUAGE sql IMMUTABLE
+AS $$
+    SELECT CASE WHEN p_code ~ '^\d{7,}$' THEN
+        array_remove(ARRAY[
+            CASE WHEN right(p_code, 1)::int = fn_barcode_check_digit(left(p_code, -1)) THEN left(p_code, -1) END,
+            CASE WHEN p_code LIKE '0%' THEN substr(p_code, 2) END,
+            '0' || p_code], NULL)
+    ELSE '{}'::text[] END;
+$$;
+
+-- ---------------------------------------------------------------------------
 -- Categories (a tree: parent_id points to the parent category, NULL = top level)
 -- ---------------------------------------------------------------------------
 DROP FUNCTION IF EXISTS public.fn_category_get_all();

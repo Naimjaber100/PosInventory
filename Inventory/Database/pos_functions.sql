@@ -245,6 +245,22 @@ BEGIN
       AND pk.is_active AND pk.can_sell AND p.is_active AND p.product_type IN (1, 2);
     IF FOUND THEN RETURN; END IF;
 
+    -- The same label written another way: saved without its check digit, or with / without a leading 0
+    -- (fn_barcode_variants, Database/product_functions.sql)
+    RETURN QUERY
+    SELECT pk.packaging_id, p.product_id,
+           fn_item_description(p.name::text, p.size::text, p.color::text, pk.name::text),
+           pk.name, pk.barcode, pk.sale_price, pk.factor, p.is_weighted, p.base_unit,
+           CASE WHEN p.product_type = 2
+                THEN (SELECT min(floor(c.stock_qty / b.quantity)) FROM bundle_items b
+                      JOIN products c ON c.product_id = b.component_product_id WHERE b.bundle_product_id = p.product_id)
+                ELSE p.stock_qty END
+    FROM product_packaging pk
+    JOIN products p ON p.product_id = pk.product_id
+    WHERE pk.barcode = ANY (fn_barcode_variants(v_search))
+      AND pk.is_active AND pk.can_sell AND p.is_active AND p.product_type IN (1, 2);
+    IF FOUND THEN RETURN; END IF;
+
     v_pattern := replace(replace(replace(v_search, '\', '\\'), '%', '\%'), '_', '\_');
     v_words   := regexp_split_to_array(v_pattern, '\s+');
 
