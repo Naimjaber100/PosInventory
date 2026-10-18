@@ -24,7 +24,8 @@ namespace Inventory.Ai
     public sealed class AiInvoiceLine
     {
         [JsonPropertyName("text")] public string Text { get; set; } = string.Empty;           // as written on the invoice
-        [JsonPropertyName("item_name")] public string ItemName { get; set; } = string.Empty;  // cleaned up: "Pepsi"
+        [JsonPropertyName("item_name")] public string ItemName { get; set; } = string.Empty;  // cleaned up, in the script it was written / said in
+        [JsonPropertyName("item_name_alt")] public string? ItemNameAlt { get; set; }          // the same name in the other script (سيدرز <-> Cedars), or null
         [JsonPropertyName("packaging")] public string? Packaging { get; set; }                // box, pack, bottle, can, kg...
         [JsonPropertyName("quantity")] public decimal Quantity { get; set; }
         [JsonPropertyName("unit_price")] public decimal? UnitPrice { get; set; }
@@ -46,7 +47,12 @@ namespace Inventory.Ai
             Return every item line of the invoice. Do not invent lines, do not merge lines, keep the order of the invoice.
             For each line:
             - text: the line exactly as written (item and packaging words).
-            - item_name: the product name cleaned up and spelled correctly (e.g. "pepsi bix" -> "Pepsi"), without quantity or packaging words.
+            - item_name: the product name cleaned up and spelled correctly (e.g. "pepsi bix" -> "Pepsi"), without quantity or packaging words,
+              in the same script as written: Arabic stays in Arabic letters ("سيدرز قديم"), Latin stays Latin. Never translate it.
+            - item_name_alt: always the same item in the other language, so it is found whether the shop saved it in Arabic or
+              in English: Arabic -> English, English / French -> Arabic. Brands are written in the other letters, ordinary
+              words are translated ("سيدرز قديم" -> "Cedars Old", "Pepsi" -> "بيبسي", "بيض بلدي" -> "farm eggs",
+              "Basmati rice" -> "رز بسمتي"). null only for a code or number that has no other form.
             - packaging: the packaging or unit if written, in English, singular: box, pack, carton, bottle, can, piece, kg...
               Common short forms: "bx" = box, "bp" / "pk" = pack, "ctn" = carton, "pc" / "pcs" = piece. null if not written.
             - quantity: the number of packagings bought.
@@ -76,10 +82,11 @@ namespace Inventory.Ai
                   "items": {
                     "type": "object",
                     "additionalProperties": false,
-                    "required": ["text", "item_name", "packaging", "quantity", "unit_price", "line_total", "barcode"],
+                    "required": ["text", "item_name", "item_name_alt", "packaging", "quantity", "unit_price", "line_total", "barcode"],
                     "properties": {
                       "text":       { "type": "string" },
                       "item_name":  { "type": "string" },
+                      "item_name_alt": { "type": ["string", "null"] },
                       "packaging":  { "type": ["string", "null"] },
                       "quantity":   { "type": "number" },
                       "unit_price": { "type": ["number", "null"] },
@@ -96,15 +103,22 @@ namespace Inventory.Ai
         private const string SpokenInstructions =
             """
             You receive the text of a voice note in which a shop owner in Lebanon lists what was bought from a supplier
-            (English, Arabic - also Lebanese dialect - or French, often mixed; it was written out automatically, so words can be misspelled).
+            (English, Arabic - also Lebanese dialect - or French, often mixed in one sentence; it was written out automatically,
+            so words can be misspelled, and English words may come out in Arabic letters or the other way round).
+            Understand every item whatever language it was said in.
             Return one line per item said. Do not invent items. Keep the order in which they were said.
             Spoken numbers are quantities: "two pepsi box", "تنين بيبسي", "deux" -> 2; "a" / "one" / "وحدة" -> 1; "half a kilo" -> 0.5.
             For each line:
             - text: the words said for that item (e.g. "2 pepsi box").
-            - item_name: the product name cleaned up and spelled correctly, in Latin letters when it is a brand
-              ("بيبسي" -> "Pepsi", "pepsi bix" -> "Pepsi"), without quantity or packaging words.
+            - item_name: the product name cleaned up and spelled correctly ("pepsi bix" -> "Pepsi"), without quantity or
+              packaging words, in the same script as said: Arabic stays in Arabic letters ("سيدرز قديم", "مارلبورو أحمر"),
+              Latin stays Latin. Never translate it: the shop's items are often written in Arabic.
+            - item_name_alt: always the same item in the other language, so it is found whether the shop saved it in Arabic or
+              in English: Arabic -> English, English / French -> Arabic. Brands are written in the other letters, ordinary
+              words are translated ("سيدرز قديم" -> "Cedars Old", "مارلبورو أحمر" -> "Marlboro Red", "Pepsi" -> "بيبسي",
+              "بيض" -> "eggs", "rice basmati" -> "رز بسمتي", "حلوم" -> "halloumi cheese"). null only for a code or number.
             - packaging: box, pack, carton, bottle, can, piece, kg... in English, singular ("علبة"/"كرتونة" -> box / carton,
-              "قنينة" -> bottle, "كيلو" -> kg, "bp" / "pk" -> pack); null if not said.
+              "كروز" (of cigarettes) -> carton, "قنينة" -> bottle, "كيلو" -> kg, "bp" / "pk" -> pack); null if not said.
             - quantity: the number of packagings; 1 when no number was said.
             - unit_price / line_total: only when a price was said ("at 9 dollars each" -> unit_price 9); else null.
             - barcode: null.

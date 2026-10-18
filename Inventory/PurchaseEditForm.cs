@@ -9,6 +9,7 @@ namespace Inventory
     // Drafts can be changed; posted / cancelled invoices open read-only.
     // Type: Purchase, or Return to supplier (the items that go back, added like a purchase): posting a return takes
     // them out of stock and lowers what we owe the supplier. A draft can still change its type.
+    // Print: what is saved of it, on A4 (PurchasePrint).
     public partial class PurchaseEditForm : Form
     {
         private readonly PurchaseRepository _purchaseRepository = new();
@@ -47,6 +48,11 @@ namespace Inventory
                 MarkDirty();
             };
             headerGroup.Controls.Add(_typeCombo);
+
+            // Print (left of the other buttons): what is saved of this purchase, on A4
+            var printButton = new Button { Text = "Print", Size = new Size(110, cancelButton.Height), Margin = cancelButton.Margin };
+            printButton.Click += async (_, _) => await PrintAsync();
+            buttonsPanel.Controls.Add(printButton);
 
             AppTheme.Apply(this);
             _purchaseId = purchaseId;
@@ -738,6 +744,30 @@ namespace Inventory
         }
 
         #endregion
+
+        // The printout is of what is saved: a new purchase or unsaved changes are saved first (as a draft)
+        private async Task PrintAsync()
+        {
+            if (!IsReadOnly && (_purchaseId == null && SavedPurchaseId == 0 || _dirty))
+            {
+                MessageBox.Show(this, "Save the purchase first (Save draft or Save & post): the printout shows what is saved.",
+                    "Print", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            try
+            {
+                UseWaitCursor = true;
+                await Printing.PurchasePrint.PrintAsync(this, _purchaseId ?? SavedPurchaseId);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, "Could not print:\n" + ex.Message, "Print", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                UseWaitCursor = false;
+            }
+        }
 
         private void cancelButton_Click(object sender, EventArgs e)
         {

@@ -13,6 +13,8 @@ namespace Inventory.Printing
         public DateTimeOffset InvoiceDate { get; set; }
         public string? Cashier { get; set; }
         public string? Customer { get; set; }
+        public string? CustomerPhone { get; set; }     // for the A4 invoice (SaleInvoicePrint)
+        public string? CustomerAddress { get; set; }
         public decimal SubTotal { get; set; }
         public decimal LineDiscounts { get; set; }
         public decimal Discount { get; set; }          // invoice discount

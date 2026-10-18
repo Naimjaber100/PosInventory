@@ -258,7 +258,7 @@ namespace Inventory
             {
                 var row = new RowData { Line = line };
                 var name = string.IsNullOrWhiteSpace(line.ItemName) ? line.Text : line.ItemName;
-                row.Candidates.AddRange(await _purchaseRepository.MatchPackagingAsync(name, line.Packaging, line.Barcode));
+                row.Candidates.AddRange(await _purchaseRepository.MatchPackagingAsync(name, line.Packaging, line.Barcode, textAlt: line.ItemNameAlt));
                 if (row.Candidates.Count > 0 && row.Candidates[0].Score >= GoodMatch) row.Chosen = row.Candidates[0];
                 _rows.Add(row);
             }

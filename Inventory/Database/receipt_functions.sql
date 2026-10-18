@@ -7,7 +7,7 @@ DROP FUNCTION IF EXISTS public.fn_sale_receipt(integer);
 
 -- One sale or return as JSON:
 -- { company: {name, address, mobile, email, vat_number},
---   invoice_no, invoice_type (1 sale, 2 return), invoice_date, cashier, customer,
+--   invoice_no, invoice_type (1 sale, 2 return), invoice_date, cashier, customer, customer_phone, customer_address,
 --   sub_total, line_discounts, discount, promo_name, total, change_lbp, usd_rate, primary_code,
 --   lines:    [{ item_name, quantity, unit_price, discount, promo_name, line_total }],
 --   payments: [{ method (1 cash, 2 card, 3 account), currency, amount, amount_lbp }] }
@@ -26,6 +26,8 @@ AS $$
         'invoice_date', si.invoice_date,
         'cashier', u.full_name,
         'customer', CASE WHEN cu.customer_id IS NOT NULL AND cu.customer_id <> 1 THEN cu.name END,
+        'customer_phone', CASE WHEN cu.customer_id <> 1 THEN cu.phone END,
+        'customer_address', CASE WHEN cu.customer_id <> 1 THEN cu.address END,
         'sub_total', si.sub_total,
         'line_discounts', (SELECT coalesce(sum(l.discount), 0) FROM sales_lines l WHERE l.sale_id = si.sale_id),
         'discount', si.discount,

@@ -10,6 +10,16 @@
 --   - without a leading 0 (EAN-13 "0" + UPC-A) and with one (the other way round).
 -- Only digits, 7 or more; anything else has no other way.
 -- ---------------------------------------------------------------------------
+-- Text made comparable for a fuzzy match (AI purchase lines, fn_purchase_match_packaging): lower case, and the
+-- Arabic letters people write in more than one way made one ("أحمر" = "احمر", "ة" = "ه", "ى" = "ي"),
+-- without the short vowel marks and the stretching line (ـ).
+CREATE OR REPLACE FUNCTION public.fn_text_normalize(p_text text)
+RETURNS text
+LANGUAGE sql IMMUTABLE
+AS $$
+    SELECT regexp_replace(translate(lower(coalesce(p_text, '')), 'أإآٱةىؤئ', 'اااايهيوي'), '[ً-ْـ]', '', 'g');
+$$;
+
 CREATE OR REPLACE FUNCTION public.fn_barcode_check_digit(p_digits text)
 RETURNS integer
 LANGUAGE sql IMMUTABLE

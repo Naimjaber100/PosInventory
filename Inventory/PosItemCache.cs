@@ -6,12 +6,14 @@ namespace Inventory
     // The cashier's item list in memory, so a scan or a name search does not wait for the database
     // (with 100,000 items a scan is a dictionary lookup, a name search a few milliseconds).
     //   - by barcode and by scale code: dictionaries (a scan);
-    //   - by name: every word must be in the product name, or the barcode starts with the text (as fn_pos_find_item).
+    //   - by name: every word must be in the product name, or the text is in the barcode, any part (as fn_pos_find_item).
     // Filled once (fn_pos_item_list), in the background, when the first cashier screen opens; kept for the next one.
-    // Refresh() then reads only what changed since the last time: prices, names, barcodes, new items, stock,
-    // items that can no longer be sold. It runs as soon as the database says something changed (LISTEN / NOTIFY:
-    // a price changed in the back office reaches every cashier within a moment), after each sale, and every few
-    // minutes in case a notification was lost; every 4 hours it reads everything again.
+    // Refresh() then reads only what changed since the last time: prices, names, barcodes, pack sizes, new items,
+    // items that can no longer be sold. It runs as soon as the database says one of those changed (LISTEN / NOTIFY:
+    // a price changed in the back office reaches every cashier within a moment), and every few minutes in case a
+    // notification was lost; every 4 hours it reads everything again.
+    // Sales and purchases do not make it read: the stock shown with an item (the cashier's stock warning) is as it
+    // was at the last full read, and the database checks the real stock when a sale is saved.
     // Not found here = the cashier asks the database as before, and what it finds is added here.
     // Used on the UI thread only; the first load builds its dictionaries on a background thread and swaps them in.
     public sealed class PosItemCache
@@ -189,7 +191,7 @@ namespace Inventory
         /// <summary>
         /// As fn_pos_find_item: an exact barcode gives that one packaging (also when the label has the check digit the
         /// item was saved without, or a leading 0 more or less); otherwise every word must be in the product
-        /// name, or the barcode starts with the text. By name, then pack size. Empty when nothing matches (or not loaded).
+        /// name, or the text is in the barcode ("6663" finds 145556663). By name, then pack size. Empty when nothing matches (or not loaded).
         /// </summary>
         public List<PosItemModel> Find(string search, int limit = 30)
         {
@@ -203,7 +205,7 @@ namespace Inventory
             var words = search.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
             return _byPackaging.Values
                 .Where(r => words.All(w => r.ProductName.Contains(w, StringComparison.OrdinalIgnoreCase))
-                            || (r.Barcode != null && r.Barcode.StartsWith(search, StringComparison.Ordinal)))
+                            || (r.Barcode != null && r.Barcode.Contains(search, StringComparison.Ordinal)))
                 .OrderBy(r => r.ProductName, StringComparer.CurrentCultureIgnoreCase)
                 .ThenBy(r => r.Factor)
                 .ThenBy(r => r.PackagingId)

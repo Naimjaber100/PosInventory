@@ -5,6 +5,7 @@ namespace Inventory
 {
     // Purchase invoices on top; the item lines of the selected invoice below.
     // Returns to the supplier (Type: Return on the purchase screen, numbered PR-...) are red in the list.
+    // Print: the selected purchase or return on A4 (PurchasePrint).
     public partial class PurchaseForm : Form
     {
         private readonly PurchaseRepository _purchaseRepository = new();
@@ -23,6 +24,19 @@ namespace Inventory
             {
                 if (invoicesGrid.Columns[nameof(PurchaseInvoiceModel.PurchaseNo)] is { } number) number.MinimumWidth = 125;
             };
+
+            // Print: the selected purchase or return on A4 (the search moves right to make room)
+            var printButton = new Button
+            {
+                Text = "Print",
+                Location = new Point(openPurchaseButton.Right + 10, openPurchaseButton.Top),
+                Size = openPurchaseButton.Size,
+            };
+            printButton.Click += async (_, _) => await PrintSelectedAsync();
+            toolbarPanel.Controls.Add(printButton);
+            var shift = printButton.Right + 18 - searchLabel.Left;
+            searchLabel.Left += shift;
+            searchBox.Left += shift;
             invoicesGrid.CellFormatting += (_, e) =>
             {
                 if (e.RowIndex >= 0 && e.CellStyle != null && invoicesGrid.Rows[e.RowIndex].DataBoundItem is PurchaseInvoiceModel { IsReturn: true })
@@ -31,6 +45,28 @@ namespace Inventory
 
             AppTheme.Apply(this);
             pageSizeCombo.SelectedItem = _pageSize;
+        }
+
+        private async Task PrintSelectedAsync()
+        {
+            if (invoicesGrid.CurrentRow?.DataBoundItem is not PurchaseInvoiceModel invoice)
+            {
+                MessageBox.Show(this, "Select a purchase first.", "Print", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            try
+            {
+                UseWaitCursor = true;
+                await Printing.PurchasePrint.PrintAsync(this, invoice.PurchaseId);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, "Could not print:\n" + ex.Message, "Print", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                UseWaitCursor = false;
+            }
         }
 
         private async void PurchaseForm_Load(object? sender, EventArgs e)

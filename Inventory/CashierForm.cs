@@ -118,7 +118,7 @@ namespace Inventory
         // Scans and name searches look in the item list in memory first (PosItemCache), the database only when
         // an item is not there. Until the list is loaded every search goes to the database, as before.
         // A change of price or item is pushed by the database (LISTEN / NOTIFY) and read at once; the timer is
-        // only the safety net for a notification lost while the network was down.
+        // only the safety net for a notification lost while the network was down. A sale reads nothing.
         private readonly PosItemCache _items = PosItemCache.Shared;
         private System.Windows.Forms.Timer? _itemsTimer;
         private static readonly TimeSpan ItemsRefreshAge = TimeSpan.FromMinutes(5);
@@ -1414,7 +1414,6 @@ namespace Inventory
             UpdateInfo();
             UpdateTotals();
             if (DateTime.Now - _promotionsLoadedAt > PromotionsAge) _ = LoadPromotionsAsync(betweenSales: true);
-            _ = RefreshItemListAsync();   // the stock of what was just sold, and any price changed meanwhile
         }
 
         private void CashierForm_FormClosing(object? sender, FormClosingEventArgs e)

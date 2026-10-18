@@ -46,12 +46,14 @@ namespace Inventory.Repositories
         }
 
         /// <summary>
-        /// The packagings that best match a line read from an invoice photo (fuzzy name, packaging, barcode), best first.
+        /// The packagings that best match a line read from an invoice photo or a voice note (fuzzy name, packaging, barcode),
+        /// best first. textAlt = the same name in the other script (Arabic / Latin): the better of the two counts.
         /// </summary>
-        public async Task<List<PackagingLookupModel>> MatchPackagingAsync(string text, string? packaging, string? barcode, int limit = 5)
+        public async Task<List<PackagingLookupModel>> MatchPackagingAsync(string text, string? packaging, string? barcode, int limit = 5, string? textAlt = null)
         {
             var parameters = new DynamicParameters();
             parameters.Add("p_text", text);
+            parameters.Add("p_text_alt", textAlt, DbType.String);
             parameters.Add("p_packaging", packaging, DbType.String);
             parameters.Add("p_barcode", barcode, DbType.String);
             parameters.Add("p_limit", limit);

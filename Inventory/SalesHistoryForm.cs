@@ -6,6 +6,7 @@ namespace Inventory
     // Sales (cashier F7): the finished sales and returns of a cashier between two dates (Today by default).
     // Top: total sales and total profit (returns subtracted), invoice count, returns. Click an invoice: its items below.
     // A User sees only their own invoices; a Manager can choose a cashier or All users.
+    // The selected invoice: Print receipt / Receipt preview (80 mm), or Print A4 invoice (a normal printer).
     public partial class SalesHistoryForm : Form
     {
         private const int AllUsers = 0;
@@ -22,6 +23,12 @@ namespace Inventory
         public SalesHistoryForm()
         {
             InitializeComponent();
+
+            // Print A4 invoice (beside the receipt buttons): the selected invoice on a normal printer
+            var a4Button = new Button { Text = "Print A4 invoice", Size = new Size(160, printButton.Height), Margin = printButton.Margin };
+            a4Button.Click += async (_, _) => await PrintA4Async();
+            bottomPanel.Controls.Add(a4Button);
+
             AppTheme.Apply(this);
             BuildCards();
             fromPicker.Value = toPicker.Value = DateTime.Today;
@@ -254,6 +261,29 @@ namespace Inventory
             var problem = await Printing.ReceiptPrinter.PrintSaleAsync(sale.SaleId, _currencies);
             printButton.Enabled = true;
             if (problem != null) MessageBox.Show(this, problem, "Print receipt", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+
+        // Print A4 invoice: the selected sale or return on a normal printer (printer choice, then the preview)
+        private async Task PrintA4Async()
+        {
+            if (invoicesGrid.CurrentRow?.DataBoundItem is not SaleHistoryModel sale)
+            {
+                MessageBox.Show(this, "Select an invoice first.", "Print", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            try
+            {
+                UseWaitCursor = true;
+                await Printing.SaleInvoicePrint.PrintAsync(this, sale.SaleId, _currencies);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, "Could not print:\n" + ex.Message, "Print", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                UseWaitCursor = false;
+            }
         }
 
         // Receipt preview: the selected invoice as it prints (works without a printer)
