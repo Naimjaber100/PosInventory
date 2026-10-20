@@ -18,6 +18,8 @@ namespace Inventory
         {
             InitializeComponent();
 
+            Validation.InputRules.UsePhoneInput(mobileText);
+
             // Logo: in the free last row of the fields, with Choose / Remove
             _logoPicture = new PictureBox
             {
@@ -111,6 +113,12 @@ namespace Inventory
             {
                 MessageBox.Show(this, "The company name is required.", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 nameText.Focus();
+                return;
+            }
+            if (Validation.InputRules.Check(nameText, addressText, mobileText) is { } rule)
+            {
+                MessageBox.Show(this, rule.Problem, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                rule.Field.Focus();
                 return;
             }
             if (company.Email.Length > 0 && !System.Net.Mail.MailAddress.TryCreate(company.Email, out _))

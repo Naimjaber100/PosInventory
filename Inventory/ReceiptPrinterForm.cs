@@ -5,8 +5,9 @@ using Inventory.Repositories;
 
 namespace Inventory
 {
-    // Settings > Receipt printer: the 80 mm printer of THIS computer, paper width, copies, print after each sale,
-    // and the footer text (same on every computer). The printer can be typed before it is installed:
+    // Settings > Receipt printer: the 80 mm printer of THIS POS station, paper width, copies, print after each sale,
+    // or no printing at all on this station; saved in "ReceiptPrinter" of appsettings.json next to the program (ReceiptSettings).
+    // The footer text is the same on every station (database). The printer can be typed before it is installed:
     // until then sales work normally and nothing prints.
     public partial class ReceiptPrinterForm : Form
     {
@@ -27,6 +28,7 @@ namespace Inventory
             try
             {
                 var settings = await ReceiptSettings.LoadAsync();
+                enabledCheck.Checked = settings.Enabled;
                 printerCombo.Text = settings.PrinterName;
                 paperCombo.SelectedIndex = settings.PaperWidthMm == 58 ? 1 : 0;
                 copiesInput.Value = settings.Copies;
@@ -44,6 +46,7 @@ namespace Inventory
 
         private ReceiptSettings FromScreen() => new()
         {
+            Enabled = enabledCheck.Checked,
             PrinterName = printerCombo.Text.Trim(),
             PaperWidthMm = paperCombo.SelectedIndex == 1 ? 58 : 80,
             Copies = (int)copiesInput.Value,
@@ -54,12 +57,19 @@ namespace Inventory
 
         private void printerCombo_TextChanged(object? sender, EventArgs e) => ShowPrinterStatus();
 
+        private void enabledCheck_CheckedChanged(object? sender, EventArgs e)
+        {
+            printerCombo.Enabled = paperCombo.Enabled = copiesInput.Enabled = autoCheck.Enabled = enabledCheck.Checked;
+            ShowPrinterStatus();
+        }
+
         private void ShowPrinterStatus()
         {
             var settings = FromScreen();
             var count = printerCombo.Items.Count;
             (printerStatusLabel.Text, printerStatusLabel.ForeColor) =
-                !settings.HasPrinter ? ("No printer: sales work, no receipt is printed. Type the printer's Windows name or pick it" +
+                !settings.Enabled ? ("Printing is off on this station: sales work, no receipt is printed here.", Color.DimGray)
+                : !settings.HasPrinter ? ("No printer: sales work, no receipt is printed. Type the printer's Windows name or pick it" +
                                         (count == 0 ? " (no printer is installed on this computer yet)." : "."), Color.DimGray)
                 : settings.PrinterInstalled ? ("Installed on this computer: receipts will print.", Color.FromArgb(34, 139, 117))
                 : ("Not installed yet: saved anyway; receipts print as soon as a printer with exactly this name is installed.", Color.FromArgb(217, 119, 6));

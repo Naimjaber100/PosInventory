@@ -31,6 +31,8 @@ namespace Inventory
             fieldsTable = new TableLayoutPanel();
             computerCaption = new Label();
             computerLabel = new Label();
+            enabledCaption = new Label();
+            enabledCheck = new CheckBox();
             printerCaption = new Label();
             printerCombo = new ComboBox();
             printerStatusLabel = new Label();
@@ -58,29 +60,32 @@ namespace Inventory
             fieldsTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             fieldsTable.Controls.Add(computerCaption, 0, 0);
             fieldsTable.Controls.Add(computerLabel, 1, 0);
-            fieldsTable.Controls.Add(printerCaption, 0, 1);
-            fieldsTable.Controls.Add(printerCombo, 1, 1);
-            fieldsTable.Controls.Add(printerStatusLabel, 1, 2);
-            fieldsTable.Controls.Add(paperCaption, 0, 3);
-            fieldsTable.Controls.Add(paperCombo, 1, 3);
-            fieldsTable.Controls.Add(copiesCaption, 0, 4);
-            fieldsTable.Controls.Add(copiesInput, 1, 4);
-            fieldsTable.Controls.Add(autoCheck, 1, 5);
-            fieldsTable.Controls.Add(footerCaption, 0, 6);
-            fieldsTable.Controls.Add(footerText, 1, 6);
+            fieldsTable.Controls.Add(enabledCaption, 0, 1);
+            fieldsTable.Controls.Add(enabledCheck, 1, 1);
+            fieldsTable.Controls.Add(printerCaption, 0, 2);
+            fieldsTable.Controls.Add(printerCombo, 1, 2);
+            fieldsTable.Controls.Add(printerStatusLabel, 1, 3);
+            fieldsTable.Controls.Add(paperCaption, 0, 4);
+            fieldsTable.Controls.Add(paperCombo, 1, 4);
+            fieldsTable.Controls.Add(copiesCaption, 0, 5);
+            fieldsTable.Controls.Add(copiesInput, 1, 5);
+            fieldsTable.Controls.Add(autoCheck, 1, 6);
+            fieldsTable.Controls.Add(footerCaption, 0, 7);
+            fieldsTable.Controls.Add(footerText, 1, 7);
             fieldsTable.Dock = DockStyle.Fill;
             fieldsTable.Location = new Point(0, 0);
             fieldsTable.Name = "fieldsTable";
             fieldsTable.Padding = new Padding(12);
-            fieldsTable.RowCount = 7;
+            fieldsTable.RowCount = 8;
             fieldsTable.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
+            fieldsTable.RowStyles.Add(new RowStyle(SizeType.Absolute, 36F));
             fieldsTable.RowStyles.Add(new RowStyle(SizeType.Absolute, 42F));
             fieldsTable.RowStyles.Add(new RowStyle(SizeType.Absolute, 46F));
             fieldsTable.RowStyles.Add(new RowStyle(SizeType.Absolute, 42F));
             fieldsTable.RowStyles.Add(new RowStyle(SizeType.Absolute, 42F));
             fieldsTable.RowStyles.Add(new RowStyle(SizeType.Absolute, 38F));
             fieldsTable.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-            fieldsTable.Size = new Size(620, 368);
+            fieldsTable.Size = new Size(620, 404);
             fieldsTable.TabIndex = 0;
             //
             // computerCaption
@@ -90,6 +95,24 @@ namespace Inventory
             computerCaption.TabIndex = 0;
             computerCaption.Text = "This computer";
             computerCaption.TextAlign = ContentAlignment.MiddleLeft;
+            //
+            // enabledCaption
+            //
+            enabledCaption.Dock = DockStyle.Fill;
+            enabledCaption.Name = "enabledCaption";
+            enabledCaption.Text = "Receipts";
+            enabledCaption.TextAlign = ContentAlignment.MiddleLeft;
+            //
+            // enabledCheck
+            //
+            enabledCheck.AutoSize = true;
+            enabledCheck.Checked = true;
+            enabledCheck.CheckState = CheckState.Checked;
+            enabledCheck.Name = "enabledCheck";
+            enabledCheck.Padding = new Padding(0, 4, 0, 0);
+            enabledCheck.TabIndex = 2;
+            enabledCheck.Text = "Print receipts on this station (untick: this station never prints)";
+            enabledCheck.CheckedChanged += enabledCheck_CheckedChanged;
             //
             // computerLabel
             //
@@ -239,7 +262,7 @@ namespace Inventory
             AutoScaleDimensions = new SizeF(8F, 20F);
             AutoScaleMode = AutoScaleMode.Font;
             CancelButton = cancelButton;
-            ClientSize = new Size(620, 420);
+            ClientSize = new Size(620, 456);
             Controls.Add(fieldsTable);
             Controls.Add(buttonsPanel);
             FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -262,6 +285,8 @@ namespace Inventory
         private TableLayoutPanel fieldsTable;
         private Label computerCaption;
         private Label computerLabel;
+        private Label enabledCaption;
+        private CheckBox enabledCheck;
         private Label printerCaption;
         private ComboBox printerCombo;
         private Label printerStatusLabel;

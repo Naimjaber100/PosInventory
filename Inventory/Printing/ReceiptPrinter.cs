@@ -34,7 +34,8 @@ namespace Inventory.Printing
 
         /// <summary>Why nothing can be printed on this computer (no printer set, not installed), or null.</summary>
         public static string? WhyNot(ReceiptSettings settings) =>
-            !settings.HasPrinter ? "No receipt printer is set (Settings > Receipt printer)."
+            !settings.Enabled ? $"Receipt printing is off on this station (\"Enabled\": false in \"{ReceiptSettings.Section}\", {ReceiptSettings.ConfigFile})."
+            : !settings.HasPrinter ? "No receipt printer is set (Settings > Receipt printer)."
             : !settings.PrinterInstalled ? $"The receipt printer \"{settings.PrinterName}\" is not installed on this computer."
             : null;
 

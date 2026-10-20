@@ -9,6 +9,8 @@ namespace Inventory
     public partial class UserEditForm : Form
     {
         private const int MinPasswordLength = 4;
+        private const int MaxPasswordLength = 8;
+        private const int MaxNameLength = 50;
 
         private readonly UserRepository _userRepository = new();
         private readonly UserModel? _user;
@@ -47,7 +49,7 @@ namespace Inventory
             {
                 Text = "Add user";
                 roleCombo.SelectedValue = UserModel.UserRole;
-                passwordHint.Text = $"At least {MinPasswordLength} characters, different for each user.";
+                passwordHint.Text = $"{MinPasswordLength} to {MaxPasswordLength} characters, different for each user.";
             }
         }
 
@@ -67,8 +69,10 @@ namespace Inventory
             string? problem = null;
             Control? field = null;
             if (name.Length == 0) (problem, field) = ("Name is required.", nameText);
+            else if (name.Length > MaxNameLength) (problem, field) = ($"The name can have at most {MaxNameLength} characters (now {name.Length}).", nameText);
             else if (password.Length == 0 && (_user == null || !_user.PasswordSet)) (problem, field) = ("Set a password for this user.", passwordText);
             else if (password.Length > 0 && password.Length < MinPasswordLength) (problem, field) = ($"The password needs at least {MinPasswordLength} characters.", passwordText);
+            else if (password.Length > MaxPasswordLength) (problem, field) = ($"The password can have at most {MaxPasswordLength} characters.", passwordText);
             else if (password != confirmText.Text) (problem, field) = ("The two passwords are not the same.", confirmText);
             if (problem != null)
             {

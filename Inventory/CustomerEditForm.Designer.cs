@@ -104,7 +104,7 @@ namespace Inventory
             // 
             nameText.Anchor = AnchorStyles.Left | AnchorStyles.Right;
             nameText.Location = new Point(145, 19);
-            nameText.MaxLength = 150;
+            nameText.MaxLength = 50;
             nameText.Name = "nameText";
             nameText.PlaceholderText = "Client or company name";
             nameText.Size = new Size(420, 27);
@@ -126,7 +126,7 @@ namespace Inventory
             phoneText.Location = new Point(145, 61);
             phoneText.MaxLength = 30;
             phoneText.Name = "phoneText";
-            phoneText.PlaceholderText = "e.g. 03 123 456";
+            phoneText.PlaceholderText = "e.g. 03123456";
             phoneText.Size = new Size(420, 27);
             phoneText.TabIndex = 3;
             // 
@@ -144,7 +144,7 @@ namespace Inventory
             // 
             addressText.Anchor = AnchorStyles.Left | AnchorStyles.Right;
             addressText.Location = new Point(145, 103);
-            addressText.MaxLength = 250;
+            addressText.MaxLength = 200;
             addressText.Name = "addressText";
             addressText.Size = new Size(420, 27);
             addressText.TabIndex = 5;

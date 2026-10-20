@@ -80,3 +80,10 @@ C:\Users\naim.jaber\AppData\Local\Temp\claude\c--Projects-Inventory\23b42017-e44
 C:\Users\naim.jaber\AppData\Local\Temp\claude\c--Projects-Inventory\23b42017-e443-4dfe-adfb-bd6486bbdba3\scratchpad\build\Inventory.runtimeconfig.json
 C:\Users\naim.jaber\AppData\Local\Temp\claude\c--Projects-Inventory\23b42017-e443-4dfe-adfb-bd6486bbdba3\scratchpad\build\Inventory.dll
 C:\Users\naim.jaber\AppData\Local\Temp\claude\c--Projects-Inventory\23b42017-e443-4dfe-adfb-bd6486bbdba3\scratchpad\build\Inventory.pdb
+C:\Users\naim.jaber\AppData\Local\Temp\invbuild\appsettings.json
+C:\Users\naim.jaber\AppData\Local\Temp\invbuild\appsettings.local.json
+C:\Users\naim.jaber\AppData\Local\Temp\invbuild\Inventory.exe
+C:\Users\naim.jaber\AppData\Local\Temp\invbuild\Inventory.deps.json
+C:\Users\naim.jaber\AppData\Local\Temp\invbuild\Inventory.runtimeconfig.json
+C:\Users\naim.jaber\AppData\Local\Temp\invbuild\Inventory.dll
+C:\Users\naim.jaber\AppData\Local\Temp\invbuild\Inventory.pdb

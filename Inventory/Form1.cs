@@ -730,7 +730,7 @@ namespace Inventory
             try
             {
                 var printer = Printing.ReceiptSettings.Current ?? await Printing.ReceiptSettings.LoadAsync();
-                _printerLabel.Text = printer is { HasPrinter: true } ? $"Printer: {printer.PrinterName}" : "Printer: not set";
+                _printerLabel.Text = printer is { Enabled: false } ? "Printer: off on this station" : printer is { HasPrinter: true } ? $"Printer: {printer.PrinterName}" : "Printer: not set";
             }
             catch { _printerLabel.Text = string.Empty; }
         }

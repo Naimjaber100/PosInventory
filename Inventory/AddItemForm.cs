@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using Inventory.Ai;
 using Inventory.Models;
 using Inventory.Repositories;
 
@@ -50,6 +51,7 @@ namespace Inventory
                 // Stock and cost change only through stock operations (purchases, adjustments, sales)
                 costInput.Enabled = false;
                 stockInput.Minimum = -1000000000; // stock can go negative after sales
+                aiPhotoButton.Visible = false;    // reading a photo is for new items only
             }
             else
             {
@@ -277,6 +279,146 @@ namespace Inventory
             if (duplicateBarcode != null) return $"Barcode {duplicateBarcode.Key} is used twice.";
             if (_packagings.Count(p => p.IsDefault) != 1) return "Tick exactly one packaging as the default.";
             return null;
+        }
+
+        #endregion
+
+        #region Read from photo (AI)
+
+        // A photo of the product, its shelf label or price tag: the AI (OpenAI, appsettings.json) reads the name, barcode,
+        // sale price, cost and quantity, and fills them in. Nothing is saved: the user checks the fields, then saves.
+        private async void aiPhotoButton_Click(object? sender, EventArgs e)
+        {
+            if (AppConfig.OpenAi.EffectiveApiKey == null)
+            {
+                MessageBox.Show(this, "There is no OpenAI key yet.\n\nPut it in appsettings.local.json next to the program:\n{ \"OpenAI\": { \"ApiKey\": \"sk-...\" } }\nthen restart the program.",
+                    Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            using var dialog = new OpenFileDialog
+            {
+                Title = "Photo of the item, its label or price tag",
+                Filter = "Images (*.jpg;*.jpeg;*.png;*.bmp)|*.jpg;*.jpeg;*.png;*.bmp",
+            };
+            if (dialog.ShowDialog(this) != DialogResult.OK) return;
+
+            var subtitle = subtitleLabel.Text;
+            aiPhotoButton.Enabled = saveButton.Enabled = false;
+            UseWaitCursor = true;
+            ShowAiStatus($"Reading the photo with {AppConfig.OpenAi.Model} (10-30 seconds)...", Color.FromArgb(29, 78, 160));
+            try
+            {
+                var items = (await InvoiceReader.ReadItemsAsync(dialog.FileName)).Items;
+                var notes = await ToPrimaryCurrencyAsync(items);
+                if (items.Count == 0)
+                {
+                    ShowAiStatus("No item could be read on this photo. Try a clearer, straight photo.", Color.DarkGoldenrod);
+                }
+                else if (items.Count == 1)
+                {
+                    notes.AddRange(await FillFromAiAsync(items[0]));
+                    ShowAiStatus(notes.Count == 0 ? "Filled from the photo: check the fields, then save."
+                        : "Filled from the photo: check the fields, then save.   " + string.Join("   ·   ", notes), Color.FromArgb(34, 139, 117));
+                }
+                else
+                {
+                    // A list: check them all on one screen and create them together
+                    ShowAiStatus(subtitle, Color.FromArgb(90, 98, 108));
+                    if (notes.Count > 0)
+                        MessageBox.Show(this, string.Join("\n", notes), Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    var categoryId = categoryCombo.SelectedValue is int id && id > 0 ? id : (int?)null;
+                    var baseUnit = unitCombo.Text.Trim().Length > 0 ? unitCombo.Text.Trim() : "pcs";
+                    using var list = new AiItemsImportForm(items, categoryId, categoryId == null ? "(none)" : categoryCombo.Text, baseUnit);
+                    list.ShowDialog(this);
+                    if (list.CreatedCount > 0)
+                    {
+                        DialogResult = DialogResult.OK;   // the item list is refreshed
+                        Close();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                ShowAiStatus(subtitle, Color.FromArgb(90, 98, 108));
+                MessageBox.Show(this, "The photo could not be read:\n" + ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            finally
+            {
+                aiPhotoButton.Enabled = saveButton.Enabled = true;
+                UseWaitCursor = false;
+            }
+        }
+
+        // Prices read in another currency ($ on a label...) -> the primary currency, at its rate; returns notes for the user
+        private static async Task<List<string>> ToPrimaryCurrencyAsync(List<AiItem> items)
+        {
+            var notes = new List<string>();
+            var codes = items.Where(i => i.SalePrice != null || i.Cost != null)
+                .Select(i => i.Currency?.Trim()).Where(c => !string.IsNullOrEmpty(c)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            if (codes.Count == 0) return notes;
+
+            CurrencySet? currencies = null;
+            try { currencies = await new CurrencyRepository().GetSetAsync(); } catch { /* noted below */ }
+            foreach (var code in codes)
+            {
+                var currency = currencies?.Find(code!);
+                if (currency is { IsPrimary: true }) continue;
+                if (currency is not { HasRate: true })
+                {
+                    notes.Add($"prices are in {code}, which has no exchange rate: check them");
+                    continue;
+                }
+                foreach (var item in items.Where(i => string.Equals(i.Currency?.Trim(), code, StringComparison.OrdinalIgnoreCase)))
+                {
+                    if (item.SalePrice != null) item.SalePrice = Math.Round(item.SalePrice.Value * currency.Rate!.Value, 2);
+                    if (item.Cost != null) item.Cost = Math.Round(item.Cost.Value * currency.Rate!.Value, 2);
+                }
+            }
+            return notes;
+        }
+
+        // Puts what was read in the fields (prices already in the primary currency); returns short notes on what to check
+        private async Task<List<string>> FillFromAiAsync(AiItem item)
+        {
+            var notes = new List<string>();
+            if (!string.IsNullOrWhiteSpace(item.ItemName)) nameText.Text = item.ItemName.Trim();
+            else notes.Add("no name read");
+            if (!string.IsNullOrWhiteSpace(item.Size) && sizeText.TextLength == 0) sizeText.Text = item.Size.Trim();
+
+            // The base packaging (the default one, else the first) gets the barcode and the sale price
+            var packaging = _packagings.FirstOrDefault(p => p.IsDefault) ?? _packagings.FirstOrDefault();
+            if (packaging != null)
+            {
+                var barcode = new string((item.Barcode ?? string.Empty).Where(char.IsAsciiDigit).ToArray());
+                if (barcode.Length >= 6)
+                {
+                    packaging.Barcode = barcode;
+                    try
+                    {
+                        var existing = (await new PurchaseRepository().FindPackagingAsync(barcode, 5)).FirstOrDefault(p => p.Barcode == barcode);
+                        if (existing != null) notes.Add($"barcode {barcode} already belongs to \"{existing.ItemName}\"");
+                    }
+                    catch { /* only a warning */ }
+                }
+                else notes.Add("no barcode read");
+
+                if (item.SalePrice is > 0 and var price) packaging.SalePrice = Math.Round(price, 2);
+                else notes.Add("no sale price read");
+                _packagings.ResetItem(_packagings.IndexOf(packaging));
+            }
+
+            if (item.Cost is > 0 and var cost) costInput.Value = Clamp(Math.Round(cost, 2), costInput);
+            if (item.Quantity is > 0 and var qty && stockInput.Enabled) stockInput.Value = Clamp(qty, stockInput);
+            return notes;
+        }
+
+        private static decimal Clamp(decimal value, NumericUpDown input) => Math.Min(input.Maximum, Math.Max(input.Minimum, value));
+
+        private void ShowAiStatus(string text, Color color)
+        {
+            subtitleLabel.Text = text;
+            subtitleLabel.ForeColor = color;
         }
 
         #endregion

@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Net.Mail;
 using Inventory.Models;
 using Inventory.Repositories;
+using Inventory.Validation;
 
 namespace Inventory
 {
@@ -17,6 +18,7 @@ namespace Inventory
         {
             InitializeComponent();
             AppTheme.Apply(this);
+            InputRules.UsePhoneInput(phoneText);
             _customer = customer;
             _currencies = currencies;
             limitCaption.Text = $"Credit limit ({currencies.Primary.Code})";
@@ -62,6 +64,7 @@ namespace Inventory
             string? problem = null;
             Control? field = null;
             if (name.Length == 0) (problem, field) = ("The name is required.", nameText);
+            else if (InputRules.Check(nameText, addressText, phoneText) is { } rule) (problem, field) = rule;
             else if (email.Length > 0 && !IsEmail(email)) (problem, field) = ("The email address is not valid.", emailText);
             else if (!noLimitCheck.Checked)
             {

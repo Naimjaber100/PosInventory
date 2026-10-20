@@ -33,6 +33,24 @@ namespace Inventory.Ai
         [JsonPropertyName("barcode")] public string? Barcode { get; set; }
     }
 
+    // The items read on a photo for new items: one product, or a list (a written / printed list, several labels...)
+    public sealed class AiItemList
+    {
+        [JsonPropertyName("items")] public List<AiItem> Items { get; set; } = new();
+    }
+
+    // One item read on the photo
+    public sealed class AiItem
+    {
+        [JsonPropertyName("item_name")] public string? ItemName { get; set; }
+        [JsonPropertyName("barcode")] public string? Barcode { get; set; }
+        [JsonPropertyName("size")] public string? Size { get; set; }               // 330ml, 1kg...
+        [JsonPropertyName("sale_price")] public decimal? SalePrice { get; set; }
+        [JsonPropertyName("cost")] public decimal? Cost { get; set; }
+        [JsonPropertyName("quantity")] public decimal? Quantity { get; set; }
+        [JsonPropertyName("currency")] public string? Currency { get; set; }       // ISO code: LBP, USD...
+    }
+
     // Turns a photo of a supplier's invoice, or a voice note listing what was bought, into structured purchase lines
     // with OpenAI (settings: "OpenAI" in appsettings.json, the key in appsettings.local.json).
     // Photo: vision model; the photo is made smaller first (faster, cheaper).
@@ -126,25 +144,79 @@ namespace Inventory.Ai
             discount and total: only when said; else null. Never guess numbers.
             """;
 
-        /// <summary>Reads a photo of a supplier's invoice.</summary>
-        public static Task<AiInvoice> ReadAsync(string imagePath, CancellationToken cancel = default)
-        {
-            var image = Convert.ToBase64String(PrepareImage(imagePath));
-            var user = new JsonArray
+        // Photo for new items: one product (its package, shelf label / price tag) or a list of items (written, printed, a table...)
+        private const string ItemInstructions =
+            """
+            You read one photo taken to add new items to a shop's inventory in Lebanon (Arabic, English or French; printed or handwritten).
+            The photo shows either ONE product (its package, its shelf label / price tag, or a note written for it),
+            or a LIST of items (a handwritten or printed list, a table, a price list, several labels or products side by side).
+            Return one entry in "items" per item: one entry for a single product, one per line / label / product for a list.
+            Do not invent items, do not merge items, keep the order of the photo (top to bottom, left to right).
+            Column headers of a list tell which number is which (sale / price / سعر, cost / تكلفة, qty / الكمية / عدد, barcode / باركود).
+            For each item:
+            - item_name: the product name as a shop would list it: brand + product + variant (e.g. "Pepsi", "Almarai Full Fat Milk"),
+              spelled correctly, without the size and without price words. Keep the script it is written in; if both Arabic and
+              Latin are printed, use the Latin one. null if no name can be read.
+            - barcode: the digits printed under the barcode (EAN-13, EAN-8, UPC...), digits only, no spaces. Copy every digit exactly;
+              null if no barcode is visible or a digit cannot be read for sure.
+            - size: the size or weight printed on the product ("330ml", "1L", "500g"); null if not visible.
+            - sale_price: the selling price if a price tag / label / note shows one; null otherwise.
+            - cost: the cost / purchase price only if it is written as such (e.g. "cost 1.2"); null otherwise.
+            - quantity: the quantity in stock only if it is written (e.g. "qty 24"); null otherwise.
+            - currency: ISO code of the prices (USD for $, LBP for L.L / ل.ل); null if no price or no sign.
+            Numbers: plain numbers without thousands separators (12500, not 12,500). Use null for anything you cannot read; never guess.
+            """;
+
+        private static readonly JsonNode ItemSchema = JsonNode.Parse(
+            """
             {
-                new JsonObject { ["type"] = "text", ["text"] = "Read this purchase invoice." },
-                new JsonObject
-                {
-                    ["type"] = "image_url",
-                    ["image_url"] = new JsonObject { ["url"] = "data:image/jpeg;base64," + image, ["detail"] = "high" },
-                },
-            };
-            return ExtractAsync(Instructions, user, "this image", cancel);
-        }
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["items"],
+              "properties": {
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["item_name", "barcode", "size", "sale_price", "cost", "quantity", "currency"],
+                    "properties": {
+                      "item_name":  { "type": ["string", "null"] },
+                      "barcode":    { "type": ["string", "null"] },
+                      "size":       { "type": ["string", "null"] },
+                      "sale_price": { "type": ["number", "null"] },
+                      "cost":       { "type": ["number", "null"] },
+                      "quantity":   { "type": ["number", "null"] },
+                      "currency":   { "type": ["string", "null"] }
+                    }
+                  }
+                }
+              }
+            }
+            """)!;
+
+        /// <summary>Reads a photo of a supplier's invoice.</summary>
+        public static Task<AiInvoice> ReadAsync(string imagePath, CancellationToken cancel = default) =>
+            ExtractAsync<AiInvoice>(Instructions, ImageContent(imagePath, "Read this purchase invoice."), "this image", "purchase_invoice", Schema, cancel);
+
+        /// <summary>Reads a photo of one item (product, label, price tag) or a list of items: name, barcode, prices, quantity.</summary>
+        public static Task<AiItemList> ReadItemsAsync(string imagePath, CancellationToken cancel = default) =>
+            ExtractAsync<AiItemList>(ItemInstructions, ImageContent(imagePath, "Read the item(s) on this photo."), "this image", "new_items", ItemSchema, cancel);
 
         /// <summary>Turns the text of a voice note ("2 pepsi box, 1 unica pack...") into purchase lines.</summary>
         public static Task<AiInvoice> ReadSpokenTextAsync(string text, CancellationToken cancel = default) =>
-            ExtractAsync(SpokenInstructions, "Voice note:\n" + text.Trim(), "this voice note", cancel);
+            ExtractAsync<AiInvoice>(SpokenInstructions, "Voice note:\n" + text.Trim(), "this voice note", "purchase_invoice", Schema, cancel);
+
+        // The user message: a short text and the photo
+        private static JsonArray ImageContent(string imagePath, string text) => new()
+        {
+            new JsonObject { ["type"] = "text", ["text"] = text },
+            new JsonObject
+            {
+                ["type"] = "image_url",
+                ["image_url"] = new JsonObject { ["url"] = "data:image/jpeg;base64," + Convert.ToBase64String(PrepareImage(imagePath)), ["detail"] = "high" },
+            },
+        };
 
         /// <summary>
         /// Writes out a voice note (wav, mp3, m4a, ogg - e.g. WhatsApp -, webm...): OpenAI speech to text,
@@ -176,8 +248,8 @@ namespace Inventory.Ai
                 : transcript.Trim();
         }
 
-        // Chat completion with the strict JSON schema: the answer is always an AiInvoice
-        private static async Task<AiInvoice> ExtractAsync(string instructions, JsonNode userContent, string what, CancellationToken cancel)
+        // Chat completion with a strict JSON schema: the answer always has the shape of T
+        private static async Task<T> ExtractAsync<T>(string instructions, JsonNode userContent, string what, string schemaName, JsonNode schema, CancellationToken cancel)
         {
             var settings = AppConfig.OpenAi;
             var body = new JsonObject
@@ -192,7 +264,7 @@ namespace Inventory.Ai
                 ["response_format"] = new JsonObject
                 {
                     ["type"] = "json_schema",
-                    ["json_schema"] = new JsonObject { ["name"] = "purchase_invoice", ["strict"] = true, ["schema"] = Schema.DeepClone() },
+                    ["json_schema"] = new JsonObject { ["name"] = schemaName, ["strict"] = true, ["schema"] = schema.DeepClone() },
                 },
             };
 
@@ -202,7 +274,7 @@ namespace Inventory.Ai
                 throw new InvalidOperationException($"The AI could not read {what}: " + refusal);
             var json = reply?["content"]?.GetValue<string>()
                        ?? throw new InvalidOperationException($"The AI gave an empty answer for {what}. Try again.");
-            return JsonSerializer.Deserialize<AiInvoice>(json)
+            return JsonSerializer.Deserialize<T>(json)
                    ?? throw new InvalidOperationException("The AI answer could not be read.");
         }
 

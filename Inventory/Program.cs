@@ -24,6 +24,7 @@ namespace Inventory
                     }
                     AppConfig.Scale = ScaleBarcodeSettings.Read(doc.RootElement);
                     AppConfig.OpenAi = Ai.OpenAiSettings.Read(doc.RootElement);
+                    Printing.ReceiptSettings.FromConfig = Printing.ReceiptSettings.Read(doc.RootElement);   // receipt printer of this POS station
                 }
 
                 // Secrets (the OpenAI key) go in appsettings.local.json: git ignores it, so it is never committed

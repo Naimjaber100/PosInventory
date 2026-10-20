@@ -180,7 +180,7 @@ namespace Inventory
         {
             _lastSaleId = saleId;
             var settings = ReceiptSettings.Current;
-            if (!reprint && (settings == null || !settings.PrintAfterSale)) return;
+            if (!reprint && (settings == null || !settings.Enabled || !settings.PrintAfterSale)) return;   // off on this station: nothing to say
             if (!reprint && settings is { HasPrinter: false })
             {
                 if (_noPrinterShown) return;   // say it once, not after every sale

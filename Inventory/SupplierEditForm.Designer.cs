@@ -98,7 +98,7 @@ namespace Inventory
             // nameText
             //
             nameText.Anchor = AnchorStyles.Left | AnchorStyles.Right;
-            nameText.MaxLength = 150;
+            nameText.MaxLength = 50;
             nameText.Name = "nameText";
             nameText.PlaceholderText = "Supplier or company name";
             nameText.TabIndex = 1;
@@ -116,7 +116,7 @@ namespace Inventory
             phoneText.Anchor = AnchorStyles.Left | AnchorStyles.Right;
             phoneText.MaxLength = 30;
             phoneText.Name = "phoneText";
-            phoneText.PlaceholderText = "e.g. 03 123 456";
+            phoneText.PlaceholderText = "e.g. 03123456";
             phoneText.TabIndex = 3;
             //
             // addressCaption
@@ -130,7 +130,7 @@ namespace Inventory
             // addressText
             //
             addressText.Anchor = AnchorStyles.Left | AnchorStyles.Right;
-            addressText.MaxLength = 250;
+            addressText.MaxLength = 200;
             addressText.Name = "addressText";
             addressText.TabIndex = 5;
             //

@@ -89,7 +89,7 @@ namespace Inventory
             // nameText
             //
             nameText.Anchor = AnchorStyles.Left | AnchorStyles.Right;
-            nameText.MaxLength = 100;
+            nameText.MaxLength = 50;
             nameText.Name = "nameText";
             nameText.PlaceholderText = "Full name, e.g. Rami Haddad";
             nameText.TabIndex = 1;
@@ -105,7 +105,7 @@ namespace Inventory
             // passwordText
             //
             passwordText.Anchor = AnchorStyles.Left | AnchorStyles.Right;
-            passwordText.MaxLength = 100;
+            passwordText.MaxLength = 8;
             passwordText.Name = "passwordText";
             passwordText.TabIndex = 5;
             passwordText.UseSystemPasswordChar = true;
@@ -121,7 +121,7 @@ namespace Inventory
             // confirmText
             //
             confirmText.Anchor = AnchorStyles.Left | AnchorStyles.Right;
-            confirmText.MaxLength = 100;
+            confirmText.MaxLength = 8;
             confirmText.Name = "confirmText";
             confirmText.TabIndex = 7;
             confirmText.UseSystemPasswordChar = true;

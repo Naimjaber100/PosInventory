@@ -86,7 +86,7 @@ namespace Inventory
             // nameText
             //
             nameText.Anchor = AnchorStyles.Left | AnchorStyles.Right;
-            nameText.MaxLength = 150;
+            nameText.MaxLength = 50;
             nameText.Name = "nameText";
             nameText.PlaceholderText = "Shown on the login and cashier screens";
             nameText.TabIndex = 1;
@@ -102,7 +102,7 @@ namespace Inventory
             // addressText
             //
             addressText.Dock = DockStyle.Fill;
-            addressText.MaxLength = 300;
+            addressText.MaxLength = 200;
             addressText.Multiline = true;
             addressText.Name = "addressText";
             addressText.ScrollBars = ScrollBars.Vertical;
@@ -135,7 +135,7 @@ namespace Inventory
             // mobileText
             //
             mobileText.Anchor = AnchorStyles.Left | AnchorStyles.Right;
-            mobileText.MaxLength = 50;
+            mobileText.MaxLength = 16;
             mobileText.Name = "mobileText";
             mobileText.PlaceholderText = "+961 ...";
             mobileText.TabIndex = 7;

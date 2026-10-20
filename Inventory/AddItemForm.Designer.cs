@@ -78,6 +78,7 @@ namespace Inventory
             buttonsPanel = new FlowLayoutPanel();
             cancelButton = new Button();
             saveButton = new Button();
+            aiPhotoButton = new Button();
             headerPanel.SuspendLayout();
             bodyPanel.SuspendLayout();
             stockCard.SuspendLayout();
@@ -609,6 +610,7 @@ namespace Inventory
             buttonsPanel.BackColor = Color.White;
             buttonsPanel.Controls.Add(cancelButton);
             buttonsPanel.Controls.Add(saveButton);
+            buttonsPanel.Controls.Add(aiPhotoButton);
             buttonsPanel.Dock = DockStyle.Bottom;
             buttonsPanel.FlowDirection = FlowDirection.RightToLeft;
             buttonsPanel.Name = "buttonsPanel";
@@ -638,6 +640,21 @@ namespace Inventory
             saveButton.Text = "Save Product";
             saveButton.UseVisualStyleBackColor = false;
             saveButton.Click += saveButton_Click;
+            //
+            // aiPhotoButton
+            //
+            aiPhotoButton.BackColor = Color.FromArgb(37, 99, 235);
+            aiPhotoButton.FlatAppearance.BorderSize = 0;
+            aiPhotoButton.FlatStyle = FlatStyle.Flat;
+            aiPhotoButton.Font = new Font("Segoe UI Semibold", 10F, FontStyle.Bold);
+            aiPhotoButton.ForeColor = Color.White;
+            aiPhotoButton.Margin = new Padding(3, 3, 24, 3);
+            aiPhotoButton.Name = "aiPhotoButton";
+            aiPhotoButton.Size = new Size(220, 40);
+            aiPhotoButton.TabIndex = 15;
+            aiPhotoButton.Text = "📷  Read from photo (AI)";
+            aiPhotoButton.UseVisualStyleBackColor = false;
+            aiPhotoButton.Click += aiPhotoButton_Click;
             //
             // AddItemForm
             //
@@ -726,6 +743,7 @@ namespace Inventory
         private NumericUpDown costInput;
         private CheckBox activeCheck;
         private FlowLayoutPanel buttonsPanel;
+        private Button aiPhotoButton;
         private Button cancelButton;
         private Button saveButton;
     }
