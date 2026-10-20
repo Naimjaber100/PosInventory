@@ -29,6 +29,28 @@ namespace Inventory
             a4Button.Click += async (_, _) => await PrintA4Async();
             bottomPanel.Controls.Add(a4Button);
 
+            // + New invoice (managers): a sale typed in the back office, like a purchase (SaleEditForm)
+            if (AppSession.IsManager)
+            {
+                var newButton = new Button
+                {
+                    Text = "+ New invoice", Size = new Size(140, refreshButton.Height), Margin = refreshButton.Margin,
+                    BackColor = AppTheme.Accent, ForeColor = Color.White, UseVisualStyleBackColor = false,
+                };
+                newButton.Click += async (_, _) =>
+                {
+                    using var form = new SaleEditForm();
+                    if (form.ShowDialog(this) != DialogResult.OK) return;
+                    // Show it: the period stays when it has today, else it becomes today
+                    if (fromPicker.Value.Date <= DateTime.Today && toPicker.Value.Date >= DateTime.Today) await LoadSalesAsync();
+                    else await SetPeriodAsync(DateTime.Today, DateTime.Today);
+                    var index = _sales.FindIndex(s => s.SaleId == form.SavedSaleId);
+                    if (index >= 0) invoicesGrid.CurrentCell = invoicesGrid.Rows[index].Cells.Cast<DataGridViewCell>().First(c => c.Visible);
+                };
+                filterPanel.Controls.Add(newButton);
+                filterPanel.Controls.SetChildIndex(newButton, 0);
+            }
+
             AppTheme.Apply(this);
             BuildCards();
             fromPicker.Value = toPicker.Value = DateTime.Today;

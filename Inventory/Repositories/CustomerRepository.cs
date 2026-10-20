@@ -50,14 +50,19 @@ namespace Inventory.Repositories
         /// </summary>
         public async Task<CustomerPaymentResultModel> ReceivePaymentAsync(int customerId, decimal amount, string currency, short method, int userId)
         {
-            var parameters = new DynamicParameters();
-            parameters.Add("p_customer_id", customerId);
-            parameters.Add("p_amount", amount);
-            parameters.Add("p_currency", currency);
-            parameters.Add("p_method", (int)method);
-            parameters.Add("p_user_id", userId);
+            // In the user's open shift: cash received goes into their drawer count
+            return await ShiftRepository.InCurrentShiftAsync(userId, async shiftId =>
+            {
+                var parameters = new DynamicParameters();
+                parameters.Add("p_customer_id", customerId);
+                parameters.Add("p_amount", amount);
+                parameters.Add("p_currency", currency);
+                parameters.Add("p_method", (int)method);
+                parameters.Add("p_user_id", userId);
+                parameters.Add("p_shift_id", shiftId, DbType.Int32);
 
-            return (await GetSingleAsync<CustomerPaymentResultModel>(Procedures.ReceiveCustomerPayment, parameters))!;
+                return (await GetSingleAsync<CustomerPaymentResultModel>(Procedures.ReceiveCustomerPayment, parameters))!;
+            });
         }
 
         /// <summary>The payments of a client, newest first.</summary>

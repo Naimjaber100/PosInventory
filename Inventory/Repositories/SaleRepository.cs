@@ -80,20 +80,25 @@ namespace Inventory.Repositories
             decimal invoiceDiscount, int? heldSaleId, int userId, int? customerId = null,
             decimal promoDiscount = 0, string? promoName = null)
         {
-            var parameters = new DynamicParameters();
-            parameters.Add("p_user_id", userId);
-            parameters.Add("p_customer_id", customerId, DbType.Int32);
-            parameters.Add("p_lines", new JsonbParameter(lines.Select(l => new
+            // In the user's open shift (opened when needed)
+            return await ShiftRepository.InCurrentShiftAsync(userId, async shiftId =>
             {
-                l.PackagingId, l.Quantity, l.UnitPrice, Discount = l.TotalDiscount, l.PromoDiscount, l.PromoName,
-            }).ToList()));
-            parameters.Add("p_payments", new JsonbParameter(payments.Where(p => p.Amount > 0)));
-            parameters.Add("p_invoice_discount", invoiceDiscount);
-            parameters.Add("p_held_sale_id", heldSaleId, DbType.Int32);
-            parameters.Add("p_promo_discount", promoDiscount);
-            parameters.Add("p_promo_name", promoName, DbType.String);
+                var parameters = new DynamicParameters();
+                parameters.Add("p_user_id", userId);
+                parameters.Add("p_shift_id", shiftId, DbType.Int32);
+                parameters.Add("p_customer_id", customerId, DbType.Int32);
+                parameters.Add("p_lines", new JsonbParameter(lines.Select(l => new
+                {
+                    l.PackagingId, l.Quantity, l.UnitPrice, Discount = l.TotalDiscount, l.PromoDiscount, l.PromoName,
+                }).ToList()));
+                parameters.Add("p_payments", new JsonbParameter(payments.Where(p => p.Amount > 0)));
+                parameters.Add("p_invoice_discount", invoiceDiscount);
+                parameters.Add("p_held_sale_id", heldSaleId, DbType.Int32);
+                parameters.Add("p_promo_discount", promoDiscount);
+                parameters.Add("p_promo_name", promoName, DbType.String);
 
-            return (await GetSingleAsync<SaleResultModel>(Procedures.SaveSale, parameters))!;
+                return (await GetSingleAsync<SaleResultModel>(Procedures.SaveSale, parameters))!;
+            });
         }
 
         /// <summary>
@@ -138,13 +143,17 @@ namespace Inventory.Repositories
         /// </summary>
         public async Task<ReturnResultModel> SaveReturnAsync(IEnumerable<PosLine> lines, short method, string currency, int userId)
         {
-            var parameters = new DynamicParameters();
-            parameters.Add("p_user_id", userId);
-            parameters.Add("p_lines", new JsonbParameter(ToJsonLines(lines)));
-            parameters.Add("p_refund_method", (int)method);
-            parameters.Add("p_refund_currency", currency);
+            return await ShiftRepository.InCurrentShiftAsync(userId, async shiftId =>
+            {
+                var parameters = new DynamicParameters();
+                parameters.Add("p_user_id", userId);
+                parameters.Add("p_lines", new JsonbParameter(ToJsonLines(lines)));
+                parameters.Add("p_refund_method", (int)method);
+                parameters.Add("p_refund_currency", currency);
+                parameters.Add("p_shift_id", shiftId, DbType.Int32);
 
-            return (await GetSingleAsync<ReturnResultModel>(Procedures.SaveReturn, parameters))!;
+                return (await GetSingleAsync<ReturnResultModel>(Procedures.SaveReturn, parameters))!;
+            });
         }
 
         /// <summary>Finished sales and returns between two dates (inclusive), newest first. userId null = every cashier.</summary>

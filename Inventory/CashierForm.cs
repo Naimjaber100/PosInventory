@@ -103,6 +103,9 @@ namespace Inventory
             {
                 ShowStatus("Could not connect to the database: " + ex.Message, Color.Salmon);
             }
+            // The cashier's shift: open since an earlier login, else opened now; it runs until a manager ends it
+            try { await new ShiftRepository().CurrentAsync(AppConfig.CurrentUserId); }
+            catch (Exception ex) { ShowStatus("Could not open the shift: " + ex.Message, Color.Salmon); }
             await LoadQuickButtonsAsync();
             UpdateInfo();
             UpdateTotals();
@@ -211,7 +214,8 @@ namespace Inventory
             var held = _heldSaleId.HasValue ? $"   ·   Recalled held sale #{_heldSaleId}" : string.Empty;
             var mode = _returnMode ? "RETURN   ·   " : string.Empty;
             var rate = _currencies.SecondRateText.Length > 0 ? $"   ·   {_currencies.SecondRateText}" : string.Empty;
-            infoLabel.Text = $"{mode}Cashier: {AppSession.UserName}{rate}{held}";
+            var shift = ShiftRepository.LastShiftId is int id ? $"   ·   Shift #{id}" : string.Empty;
+            infoLabel.Text = $"{mode}Cashier: {AppSession.UserName}{shift}{rate}{held}";
         }
 
         /// <summary>(Re)loads the currencies and rates. Also called when they are changed in Settings.</summary>

@@ -173,6 +173,7 @@ namespace Inventory
                 })),
                 ("Currencies & exchange rates", b => ShowPage(b, () => new CurrenciesForm())),
                 ("Users", b => ShowPage(b, () => new UsersForm())),
+                ("Shifts (end shift / end of day)", b => ShowPage(b, () => new ShiftsForm())),
                 ("Receipt printer", b => ShowPage(b, () => new ReceiptPrinterForm())));
 
             // Cashier and who is logged in, at the bottom

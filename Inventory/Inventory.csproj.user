@@ -85,7 +85,13 @@
     <Compile Update="Reports\ReportForm.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Update="SaleEditForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Update="SalesHistoryForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="ShiftsForm.cs">
       <SubType>Form</SubType>
     </Compile>
     <Compile Update="SupplierEditForm.cs">

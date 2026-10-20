@@ -76,6 +76,12 @@ namespace Inventory.Repositories
         public const string GetSetting = "fn_setting";
         public const string SetSetting = "fn_setting_set";   // Database/quick_button_functions.sql
 
+        // Shifts, one open per user (Database/shift_functions.sql)
+        public const string ShiftCurrent = "fn_shift_current";
+        public const string ShiftList = "fn_shift_list";
+        public const string ShiftSummary = "fn_shift_summary";
+        public const string CloseShift = "fn_close_shift";
+
         // Promotions (Database/promotion_functions.sql)
         public const string GetPromotions = "fn_promotion_get_all";
         public const string GetActivePromotions = "fn_promotion_get_active";
