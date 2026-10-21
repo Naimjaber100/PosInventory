@@ -174,7 +174,8 @@ namespace Inventory
                 ("Currencies & exchange rates", b => ShowPage(b, () => new CurrenciesForm())),
                 ("Users", b => ShowPage(b, () => new UsersForm())),
                 ("Shifts (end shift / end of day)", b => ShowPage(b, () => new ShiftsForm())),
-                ("Receipt printer", b => ShowPage(b, () => new ReceiptPrinterForm())));
+                ("Receipt printer", b => ShowPage(b, () => new ReceiptPrinterForm())),
+                ("Database backup", b => ShowPage(b, () => new BackupForm())));
 
             // Cashier and who is logged in, at the bottom
             var bottom = new Panel { Dock = DockStyle.Bottom, Height = 148, Padding = new Padding(12, 8, 12, 10) };

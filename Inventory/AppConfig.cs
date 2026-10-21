@@ -10,6 +10,9 @@ namespace Inventory
         // AI reading of purchase invoice photos: "OpenAI" in appsettings.json
         public static Ai.OpenAiSettings OpenAi { get; set; } = new();
 
+        // Settings > Database backup: "Backup" in appsettings.json
+        public static BackupSettings Backup { get; set; } = new();
+
         // Recorded on sales, purchases and stock movements. Set by the login screen (AppSession.SignIn).
         public static int CurrentUserId { get; set; } = 1;
     }

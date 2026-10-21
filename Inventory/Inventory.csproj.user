@@ -13,6 +13,9 @@
     <Compile Update="AiPurchaseImportForm.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Update="BackupForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Update="CashierForm.cs">
       <SubType>Form</SubType>
     </Compile>

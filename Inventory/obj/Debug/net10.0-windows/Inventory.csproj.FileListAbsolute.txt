@@ -87,3 +87,5 @@ C:\Users\naim.jaber\AppData\Local\Temp\invbuild\Inventory.deps.json
 C:\Users\naim.jaber\AppData\Local\Temp\invbuild\Inventory.runtimeconfig.json
 C:\Users\naim.jaber\AppData\Local\Temp\invbuild\Inventory.dll
 C:\Users\naim.jaber\AppData\Local\Temp\invbuild\Inventory.pdb
+C:\Projects\Inventory\Inventory\obj\Debug\net10.0-windows\Inventory.SaleEditForm.resources
+C:\Projects\Inventory\Inventory\obj\Debug\net10.0-windows\Inventory.ShiftsForm.resources
