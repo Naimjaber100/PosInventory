@@ -21,8 +21,8 @@ namespace Inventory.Printing
         protected RollRenderer(CurrencySet currencies, int paperWidthMm)
         {
             Currencies = currencies;
-            // The printer cannot print to the paper edge: about 4 mm each side
-            _width = (paperWidthMm - 8) / 25.4F * 100F;
+            // What the head prints: 72 mm of 80 mm paper (576 dots at 203 dpi), 48 mm of 58 mm paper (384 dots)
+            _width = (paperWidthMm == 58 ? 48 : 72) / 25.4F * 100F;
         }
 
         public float Width => _width;
@@ -69,6 +69,45 @@ namespace Inventory.Printing
                 using var rightFormat = new StringFormat { Alignment = StringAlignment.Far, FormatFlags = StringFormatFlags.NoWrap };
                 g.DrawString(left, font, Brushes.Black, new RectangleF(0, y, _width - rightSize.Width - 6, height), leftFormat);
                 g.DrawString(right, font, Brushes.Black, new RectangleF(0, y, _width, height), rightFormat);
+            }
+            return y + height;
+        }
+
+        /// <summary>A column of a table row: its text, its share of the width (the shares add up to 1) and its alignment.</summary>
+        protected readonly record struct Cell(string Text, float Share, Align Align);
+
+        // One row of a table: each text wraps in its own column; the row is as tall as its tallest cell
+        protected float Row(Graphics? g, Font font, float y, params Cell[] cells)
+        {
+            const float Gap = 4F;   // between two columns
+            var height = font.GetHeight() + 1;
+            var x = 0F;
+            var boxes = new List<(Cell Cell, float X, float Width)>();
+            foreach (var cell in cells)
+            {
+                var width = _width * cell.Share;
+                boxes.Add((cell, x, width - Gap));
+                x += width;
+            }
+
+            var formats = boxes.Select(b =>
+            {
+                var format = new StringFormat();
+                if (b.Cell.Align == Align.Auto && RightToLeft.IsMatch(b.Cell.Text)) format.FormatFlags |= StringFormatFlags.DirectionRightToLeft;
+                format.Alignment = b.Cell.Align switch { Align.Center => StringAlignment.Center, Align.Right => StringAlignment.Far, _ => StringAlignment.Near };
+                return format;
+            }).ToList();
+            try
+            {
+                for (var i = 0; i < boxes.Count; i++)
+                    height = Math.Max(height, Measure(g, boxes[i].Cell.Text, font, boxes[i].Width, formats[i]).Height);
+                if (g != null)
+                    for (var i = 0; i < boxes.Count; i++)
+                        g.DrawString(boxes[i].Cell.Text, font, Brushes.Black, new RectangleF(boxes[i].X, y, boxes[i].Width, height), formats[i]);
+            }
+            finally
+            {
+                formats.ForEach(f => f.Dispose());
             }
             return y + height;
         }

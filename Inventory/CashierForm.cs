@@ -57,6 +57,7 @@ namespace Inventory
         private Button _payButton = null!, _quickCashButton = null!, _unpaidButton = null!, _returnButton = null!, _holdButton = null!, _recallButton = null!;
         private static readonly Color ReturnRed = Color.FromArgb(192, 57, 43);
         private static readonly Color UnpaidOrange = Color.FromArgb(214, 126, 28);
+        private ICustomerDisplay? _display;   // the customer's screen or pole display (null: none)
 
         public CashierForm()
         {
@@ -93,6 +94,7 @@ namespace Inventory
 
         private async void CashierForm_Load(object? sender, EventArgs e)
         {
+            _display = CustomerDisplays.Open(_lines);
             clockTimer.Start();
             clockTimer_Tick(null, EventArgs.Empty);
             try
@@ -169,7 +171,11 @@ namespace Inventory
             catch { /* the database is not reachable now: scans still use the list in memory */ }
         }
 
-        private void CashierForm_FormClosed(object? sender, FormClosedEventArgs e) => _itemsTimer?.Dispose();
+        private void CashierForm_FormClosed(object? sender, FormClosedEventArgs e)
+        {
+            _itemsTimer?.Dispose();
+            _display?.Close();
+        }
 
         #endregion
 
@@ -1011,6 +1017,10 @@ namespace Inventory
             subTotalValue.Text = sub.ToString("#,0");
             totalValue.Text = total.ToString("#,0");
             totalUsdValue.Text = _currencies.FormatSecond(total);
+
+            // The customer sees the same total, and what the discounts and promotions take off
+            var saved = _lines.Sum(l => l.TotalDiscount) + (validDiscount ? discount : 0) + _promoDiscount;
+            _display?.ShowTotals(_lines.Count, saved, total, _currencies, _returnMode);
         }
 
         private void linesGrid_DataBindingComplete(object? sender, DataGridViewBindingCompleteEventArgs e)
@@ -1123,6 +1133,7 @@ namespace Inventory
                     catch { /* the sale is saved; the approval note is extra */ }
                 }
                 ClearSale();
+                _display?.ShowThanks(result.TotalLbp, customer != null ? null : result.ChangeLbp, _currencies);
 
                 lastItemName.Text = $"Invoice {result.InvoiceNo}";
                 if (customer != null)
@@ -1434,6 +1445,7 @@ namespace Inventory
 
         private void ShowLastItem(PosLine line)
         {
+            _display?.ShowItem(line);
             lastItemName.Text = line.ItemName;
             lastItemPrice.Text = line.TotalDiscount > 0
                 ? $"{line.Quantity:#,0.###} x {line.UnitPrice:#,0} - {line.TotalDiscount:#,0} = {line.LineTotal:#,0}"

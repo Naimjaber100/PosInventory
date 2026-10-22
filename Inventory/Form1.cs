@@ -175,6 +175,7 @@ namespace Inventory
                 ("Users", b => ShowPage(b, () => new UsersForm())),
                 ("Shifts (end shift / end of day)", b => ShowPage(b, () => new ShiftsForm())),
                 ("Receipt printer", b => ShowPage(b, () => new ReceiptPrinterForm())),
+                ("Label scales", b => ShowPage(b, () => new ScalesForm())),
                 ("Database backup", b => ShowPage(b, () => new BackupForm())));
 
             // Cashier and who is logged in, at the bottom

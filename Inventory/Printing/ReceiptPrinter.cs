@@ -49,6 +49,12 @@ namespace Inventory.Printing
             {
                 try
                 {
+                    if (settings.EscPos)
+                    {
+                        using var renderer = create();
+                        EscPosPrinter.Print(renderer, settings.PrinterName, settings.Copies);
+                        return (string?)null;
+                    }
                     using var document = CreateDocument(create(), settings);
                     document.PrintController = new StandardPrintController();   // no "Printing page 1..." window
                     document.Print();
@@ -68,9 +74,10 @@ namespace Inventory.Printing
             var document = new PrintDocument { DocumentName = renderer.DocumentName };
             if (settings.PrinterInstalled) document.PrinterSettings.PrinterName = settings.PrinterName;
             document.PrinterSettings.Copies = (short)Math.Clamp(settings.Copies, 1, 5);
-            // A roll: paper as wide as the roll and as long as this receipt (1/100 inch)
-            var paperWidth = (int)Math.Ceiling(settings.PaperWidthMm / 25.4 * 100);
-            document.DefaultPageSettings.PaperSize = new PaperSize("Receipt", paperWidth, (int)Math.Ceiling(height) + 40);
+            // A roll: the page is as wide as what the head prints (72 mm on 80 mm paper, 576 dots) and as long as
+            // this receipt (1/100 inch). A wider page is cut on the right, and thermal printers such as the XP-80C
+            // print the dots past the head on the left of the next line.
+            document.DefaultPageSettings.PaperSize = new PaperSize("Receipt", (int)Math.Floor(renderer.Width), (int)Math.Ceiling(height) + 40);
             document.DefaultPageSettings.Margins = new Margins(0, 0, 0, 0);
             document.OriginAtMargins = false;
 
@@ -78,9 +85,12 @@ namespace Inventory.Printing
             {
                 if (e.Graphics == null) return;
                 e.Graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
-                // Centre the printable width on the roll; the printer's own margin is already outside the drawing area
-                var offset = Math.Max(0, (e.PageBounds.Width - renderer.Width) / 2F - e.PageSettings.HardMarginX);
-                e.Graphics.TranslateTransform(offset, 4);
+                // From the left edge of what the printer can print (the origin is its hard margin);
+                // a driver whose printable width is narrower gets the receipt a little smaller, never cut
+                e.Graphics.TranslateTransform(0, 4);
+                var printable = e.PageSettings.PrintableArea.Width;
+                if (printable > 50 && printable < renderer.Width)
+                    e.Graphics.ScaleTransform(printable / renderer.Width, printable / renderer.Width);
                 renderer.Render(e.Graphics);
                 e.HasMorePages = false;
             };

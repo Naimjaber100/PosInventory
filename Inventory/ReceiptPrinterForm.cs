@@ -49,6 +49,7 @@ namespace Inventory
             Enabled = enabledCheck.Checked,
             PrinterName = printerCombo.Text.Trim(),
             PaperWidthMm = paperCombo.SelectedIndex == 1 ? 58 : 80,
+            EscPos = ReceiptSettings.FromConfig?.EscPos ?? true,   // set in appsettings.json only
             Copies = (int)copiesInput.Value,
             PrintAfterSale = autoCheck.Checked,
             Footer = footerText.Text.Trim(),

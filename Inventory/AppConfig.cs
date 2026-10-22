@@ -7,6 +7,9 @@ namespace Inventory
         // How scale labels (weight / price in the barcode) are read: "ScaleBarcode" in appsettings.json
         public static ScaleBarcodeSettings Scale { get; set; } = new();
 
+        // The customer's screen on the second monitor of this POS: "CustomerDisplay" in appsettings.json
+        public static CustomerDisplaySettings CustomerDisplay { get; set; } = new();
+
         // AI reading of purchase invoice photos: "OpenAI" in appsettings.json
         public static Ai.OpenAiSettings OpenAi { get; set; } = new();
 

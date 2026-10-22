@@ -23,6 +23,12 @@ namespace Inventory.Printing
         public bool PrintAfterSale { get; set; } = true;
         public int Copies { get; set; } = 1;
         public int PaperWidthMm { get; set; } = 80;               // 80 or 58
+
+        /// <summary>
+        /// true: the receipt goes to the printer as an ESC/POS picture exactly as wide as the head (EscPosPrinter), then the
+        /// paper is cut; the Windows driver's page size plays no part. false: through the Windows driver (any printer).
+        /// </summary>
+        public bool EscPos { get; set; } = true;
         public string Footer { get; set; } = "Thank you for shopping with us";
 
         /// <summary>The company logo for the top of the receipt (Settings > Company; CompanyLogo), null = none. Same for every computer.</summary>
@@ -62,6 +68,8 @@ namespace Inventory.Printing
                         settings.Copies = Math.Clamp(copies, 1, 5); break;
                     case "paperwidthmm" when value.TryGetInt32(out var width):
                         settings.PaperWidthMm = width == 58 ? 58 : 80; break;
+                    case "escpos" when value.ValueKind is JsonValueKind.True or JsonValueKind.False:
+                        settings.EscPos = value.GetBoolean(); break;
                 }
             }
             return settings;
@@ -78,6 +86,7 @@ namespace Inventory.Printing
                 PrintAfterSale = config.PrintAfterSale,
                 Copies = config.Copies,
                 PaperWidthMm = config.PaperWidthMm,
+                EscPos = config.EscPos,
             };
             settings.Footer = await repo.GetSettingAsync("receipt_footer", settings.Footer) ?? string.Empty;
             try { settings.Logo = await new CompanyRepository().GetLogoAsync(); }
@@ -100,6 +109,7 @@ namespace Inventory.Printing
                 ["PrintAfterSale"] = PrintAfterSale,
                 ["Copies"] = Copies,
                 ["PaperWidthMm"] = PaperWidthMm,
+                ["EscPos"] = EscPos,
             };
             try
             {
@@ -109,7 +119,7 @@ namespace Inventory.Printing
             {
                 throw new InvalidOperationException($"Could not write {path}:\n{ex.Message}\n\nRun the program once as administrator, or give Windows users write access to its folder.");
             }
-            FromConfig = new ReceiptSettings { Enabled = Enabled, PrinterName = PrinterName.Trim(), PrintAfterSale = PrintAfterSale, Copies = Copies, PaperWidthMm = PaperWidthMm };
+            FromConfig = new ReceiptSettings { Enabled = Enabled, PrinterName = PrinterName.Trim(), PrintAfterSale = PrintAfterSale, Copies = Copies, PaperWidthMm = PaperWidthMm, EscPos = EscPos };
 
             await new SaleRepository().SetSettingAsync("receipt_footer", Footer.Trim());
             Current = this;

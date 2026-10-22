@@ -50,6 +50,16 @@ namespace Inventory.Repositories
         public const string GetProductScaleCode = "fn_product_get_scale_code";   // Database/scale_functions.sql
         public const string SetProductScaleCode = "fn_product_set_scale_code";
         public const string PosFindScaleItem = "fn_pos_find_scale_item";
+
+        // Label scales and the items sent to them (Database/scale_functions.sql)
+        public const string GetScales = "fn_scale_get_all";
+        public const string SaveScale = "fn_scale_save";
+        public const string DeleteScale = "fn_scale_delete";
+        public const string GetScaleItems = "fn_scale_item_list";
+        public const string AddScaleItems = "fn_scale_item_add";
+        public const string SaveScaleItem = "fn_scale_item_save";
+        public const string RemoveScaleItems = "fn_scale_item_remove";
+        public const string MarkScaleItemsSent = "fn_scale_item_mark_sent";
         public const string ImportProducts = "fn_product_import";
         public const string GetProductPackagings = "fn_product_get_packagings";
 

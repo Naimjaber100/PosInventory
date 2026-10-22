@@ -44,15 +44,21 @@ namespace Inventory.Printing
             if (!string.IsNullOrWhiteSpace(_r.Customer)) y = Text(g, $"Client: {_r.Customer}", Small, y, Align.Left);
             y = Separator(g, y + 2);
 
-            // Items: name on its own line(s), then "qty x price" and the line total
+            // Items: a table  Item | Qty | Price | Total  (a long name wraps in its column; a discount on the line under it).
+            // 58 mm paper is narrow: the smaller font, so that big amounts still fit their column.
+            var font = Width < 250 ? Small : Normal;
+            y = Row(g, Bold, y, ItemColumns("Item", "Qty", "Price", "Total"));
+            y = Separator(g, y);
             foreach (var line in _r.Lines)
             {
-                y = Text(g, line.ItemName, Normal, y, Align.Auto);
                 var qty = line.Quantity == Math.Round(line.Quantity) ? line.Quantity.ToString("#,0") : line.Quantity.ToString("#,0.###");
-                var left = $"   {qty} x {Number(line.UnitPrice)}" + (line.Discount > 0 ? $"   (-{Number(line.Discount)})" : string.Empty);
-                y = TwoColumns(g, left, Number(line.LineTotal), Normal, y);
-                if (line.Discount > 0 && !string.IsNullOrWhiteSpace(line.PromoName)) y = Text(g, $"   Promo: {line.PromoName}", Small, y, Align.Left);
-                y += 2;
+                y = Row(g, font, y, ItemColumns(line.ItemName, qty, Number(line.UnitPrice), Number(line.LineTotal)));
+                if (line.Discount > 0)
+                {
+                    var promo = string.IsNullOrWhiteSpace(line.PromoName) ? "Discount" : $"Promo: {line.PromoName}";
+                    y = TwoColumns(g, "   " + promo, "-" + Number(line.Discount), Small, y);
+                }
+                y += 3;
             }
             y = Separator(g, y);
 
@@ -87,6 +93,15 @@ namespace Inventory.Printing
             y = Text(g, $"{_r.Lines.Count} item line(s)", Small, y + 2, Align.Center);
             return y + 20;   // a little paper after the text, before the cut
         }
+
+        // The columns of the item table: the name gets what the numbers leave
+        private static Cell[] ItemColumns(string item, string qty, string price, string total) => new[]
+        {
+            new Cell(item, 0.38F, Align.Auto),
+            new Cell(qty, 0.13F, Align.Right),
+            new Cell(price, 0.24F, Align.Right),
+            new Cell(total, 0.25F, Align.Right),
+        };
 
         // The logo centred, as big as fits in its box without changing its shape
         private float Logo(Graphics? g, Bitmap logo, float y)

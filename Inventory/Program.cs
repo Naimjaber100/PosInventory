@@ -25,6 +25,7 @@ namespace Inventory
                     AppConfig.Scale = ScaleBarcodeSettings.Read(doc.RootElement);
                     AppConfig.OpenAi = Ai.OpenAiSettings.Read(doc.RootElement);
                     AppConfig.Backup = BackupSettings.Read(doc.RootElement);
+                    AppConfig.CustomerDisplay = CustomerDisplaySettings.Read(doc.RootElement);   // customer's screen of this POS station
                     Printing.ReceiptSettings.FromConfig = Printing.ReceiptSettings.Read(doc.RootElement);   // receipt printer of this POS station
                 }
 
