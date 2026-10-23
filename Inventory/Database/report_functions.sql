@@ -159,6 +159,34 @@ AS $$
     ORDER BY si.invoice_date, si.sale_id;
 $$;
 
+DROP FUNCTION IF EXISTS public.fn_report_sales_invoice_lines(date, date, integer);
+
+-- ---------------------------------------------------------------------------
+-- 3b. Sales by invoice with items: the lines of the invoices of fn_report_sales_by_invoice (same period, cashier
+-- and order), in line order. A return has negative quantity and amounts, like its invoice.
+--   discount   = the line's discount + its share of the invoice discount
+--   line_total = what the line came to; line_profit = line_total - its cost
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.fn_report_sales_invoice_lines(p_from date, p_to date, p_user_id integer DEFAULT NULL)
+RETURNS TABLE (sale_id integer, line_no integer, item_name varchar, quantity numeric, unit_price numeric,
+               discount numeric, line_total numeric, line_profit numeric)
+LANGUAGE sql STABLE
+AS $$
+    SELECT l.sale_id, l.line_no, l.description,
+           l.quantity * s.sign, l.unit_price,
+           (l.discount + l.discount_share) * s.sign,
+           l.line_total * s.sign,
+           l.line_profit * s.sign
+    FROM sales_invoices si
+    CROSS JOIN LATERAL (SELECT CASE WHEN si.invoice_type = 2 THEN -1 ELSE 1 END AS sign) s
+    JOIN sales_lines l ON l.sale_id = si.sale_id
+    WHERE si.status = 1
+      AND si.invoice_date >= (p_from::timestamp AT TIME ZONE current_setting('TimeZone'))
+      AND si.invoice_date <  ((p_to + 1)::timestamp AT TIME ZONE current_setting('TimeZone'))
+      AND (p_user_id IS NULL OR si.user_id = p_user_id)
+    ORDER BY si.invoice_date, si.sale_id, l.line_no;
+$$;
+
 DROP FUNCTION IF EXISTS public.fn_report_sales_unpaid(date, date, integer);
 
 -- ---------------------------------------------------------------------------

@@ -14,6 +14,7 @@ namespace Inventory.Repositories
         public const string ReportDailySales = "fn_report_daily_sales";
         public const string ReportSalesByItem = "fn_report_sales_by_item";
         public const string ReportSalesByInvoice = "fn_report_sales_by_invoice";
+        public const string ReportSalesInvoiceLines = "fn_report_sales_invoice_lines";
         public const string ReportSalesUnpaid = "fn_report_sales_unpaid";
         public const string ReportUnpaidByCustomer = "fn_report_unpaid_by_customer";
         public const string ReportCustomerStatement = "fn_report_customer_statement";

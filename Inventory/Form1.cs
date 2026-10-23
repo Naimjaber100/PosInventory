@@ -156,6 +156,7 @@ namespace Inventory
             _reportButtons = AddGroup(nav, "Reports", ChartIcon,
                 ("Daily sales summary", b => OpenReport(new Reports.DailySalesReport(), b)),
                 ("Sales by invoice (profit)", b => OpenReport(new Reports.SalesByInvoiceReport(), b)),
+                ("Sales by invoice with items", b => OpenReport(new Reports.SalesInvoiceDetailReport(), b)),
                 ("Sales by item (profit)", b => OpenReport(new Reports.SalesByItemReport(), b)),
                 ("Sales and unpaid", b => OpenReport(new Reports.SalesUnpaidReport(), b)),
                 ("Unpaid by client", b => OpenReport(new Reports.UnpaidByCustomerReport(), b)),

@@ -39,10 +39,50 @@ namespace Inventory
             itemsGrid.AutoGenerateColumns = false;
             columnsUpDown.Minimum = QuickButtonStyle.MinColumns;
             columnsUpDown.Maximum = QuickButtonStyle.MaxColumns;
+
+            // The cashier's Voice button (say the items instead of scanning them): off unless ticked here
+            _voiceCheck = new CheckBox
+            {
+                Text = "Voice order on the cashier",
+                AutoSize = true,
+                Dock = DockStyle.Right,
+                Font = new Font("Segoe UI", 8.5F),
+                Padding = new Padding(0, 4, 16, 0),
+            };
+            new ToolTip().SetToolTip(_voiceCheck, "Shows a Voice button (Ctrl+M) on the cashier screen: the cashier says the items " +
+                                                  "(\"1 pepsi can, 3 bread\", English or Arabic) and they are added. Needs the OpenAI key and a microphone.");
+            _voiceCheck.CheckedChanged += voiceCheck_CheckedChanged;
+            columnsUpDown.Parent!.Controls.Add(_voiceCheck);
+        }
+
+        private readonly CheckBox _voiceCheck;
+        private bool _loadingVoice;
+
+        private async Task LoadVoiceSettingAsync()
+        {
+            _loadingVoice = true;
+            try { _voiceCheck.Checked = await _saleRepository.GetSettingAsync(CashierForm.VoiceSetting, "0") == "1"; }
+            catch { _voiceCheck.Checked = false; }
+            _loadingVoice = false;
+        }
+
+        private async void voiceCheck_CheckedChanged(object? sender, EventArgs e)
+        {
+            if (_loadingVoice) return;
+            try
+            {
+                await _saleRepository.SetSettingAsync(CashierForm.VoiceSetting, _voiceCheck.Checked ? "1" : "0");
+                _changed = true;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, "Could not save the setting:\n" + ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
 
         private async void QuickButtonsForm_Load(object? sender, EventArgs e)
         {
+            await LoadVoiceSettingAsync();
             await LoadColumnsAsync();
             await ReloadAsync();
         }
@@ -827,7 +867,10 @@ namespace Inventory
         {
             if (!_changed) return;
             foreach (var cashier in Application.OpenForms.OfType<CashierForm>().ToList())
+            {
                 _ = cashier.LoadQuickButtonsAsync();
+                _ = cashier.LoadVoiceSettingAsync();
+            }
         }
     }
 }

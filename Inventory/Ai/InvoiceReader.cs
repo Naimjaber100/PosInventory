@@ -207,6 +207,14 @@ namespace Inventory.Ai
         public static Task<AiInvoice> ReadSpokenTextAsync(string text, CancellationToken cancel = default) =>
             ExtractAsync<AiInvoice>(SpokenInstructions, "Voice note:\n" + text.Trim(), "this voice note", "purchase_invoice", Schema, cancel);
 
+        // The cashier: the same reading, for what a customer buys ("1 pepsi can, 3 bread", "تلاتة خبز")
+        private static readonly string CashierSpokenInstructions =
+            SpokenInstructions.Replace("lists what was bought from a supplier", "tells the cashier what a customer is buying");
+
+        /// <summary>Turns what the cashier said ("1 pepsi can, 3 bread") into lines: quantity, item (in both languages), packaging.</summary>
+        public static Task<AiInvoice> ReadSpokenSaleAsync(string text, CancellationToken cancel = default) =>
+            ExtractAsync<AiInvoice>(CashierSpokenInstructions, "Voice note:\n" + text.Trim(), "this voice note", "purchase_invoice", Schema, cancel);
+
         // The user message: a short text and the photo
         private static JsonArray ImageContent(string imagePath, string text) => new()
         {
@@ -222,7 +230,7 @@ namespace Inventory.Ai
         /// Writes out a voice note (wav, mp3, m4a, ogg - e.g. WhatsApp -, webm...): OpenAI speech to text,
         /// model "TranscriptionModel" in appsettings.json. Returns the text.
         /// </summary>
-        public static async Task<string> TranscribeAsync(string audioPath, CancellationToken cancel = default)
+        public static async Task<string> TranscribeAsync(string audioPath, CancellationToken cancel = default, string? prompt = null)
         {
             var settings = AppConfig.OpenAi;
             var file = new FileInfo(audioPath);
@@ -237,7 +245,7 @@ namespace Inventory.Ai
                 : Path.GetFileName(audioPath);
             form.Add(audio, "file", name);
             form.Add(new StringContent(settings.TranscriptionModel), "model");
-            form.Add(new StringContent("A shop owner lists items bought for a purchase invoice: quantities, products and packaging " +
+            form.Add(new StringContent(prompt ?? "A shop owner lists items bought for a purchase invoice: quantities, products and packaging " +
                                        "(box, pack, carton, bottle, kg), sometimes prices. English, Arabic or French."), "prompt");
             if (!string.IsNullOrWhiteSpace(settings.TranscriptionLanguage)) form.Add(new StringContent(settings.TranscriptionLanguage.Trim()), "language");
 

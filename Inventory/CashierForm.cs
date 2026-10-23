@@ -109,6 +109,7 @@ namespace Inventory
             try { await new ShiftRepository().CurrentAsync(AppConfig.CurrentUserId); }
             catch (Exception ex) { ShowStatus("Could not open the shift: " + ex.Message, Color.Salmon); }
             await LoadQuickButtonsAsync();
+            await LoadVoiceSettingAsync();
             UpdateInfo();
             UpdateTotals();
             await LoadCurrenciesAsync();
@@ -175,6 +176,8 @@ namespace Inventory
         {
             _itemsTimer?.Dispose();
             _display?.Close();
+            _voiceLimit.Dispose();
+            _recorder.Dispose();
         }
 
         #endregion
@@ -371,6 +374,25 @@ namespace Inventory
             salesButton.FlatAppearance.BorderSize = 0;
             salesButton.Click += (_, _) => ShowSales();
             topBar.Controls.Add(salesButton);
+
+            // Voice order (top bar, Ctrl+M): say the items; shown only when the back office turns it on
+            _voiceButton = new Button
+            {
+                Text = "🎤 Voice",
+                Dock = DockStyle.Right,
+                Width = 120,
+                Font = new Font("Segoe UI Semibold", 10F, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                ForeColor = Color.White,
+                BackColor = VoiceBlue,
+                TabStop = false,
+                UseVisualStyleBackColor = false,
+                Visible = false,
+            };
+            _voiceButton.FlatAppearance.BorderSize = 0;
+            _voiceButton.Click += async (_, _) => await VoiceAsync();
+            topBar.Controls.Add(_voiceButton);
+            _voiceLimit.Tick += async (_, _) => { if (_recorder.IsRecording) await VoiceAsync(); };   // stops by itself
 
             // Customer pays (top bar): a customer pays for unpaid sales; the oldest invoices are settled first
             var customerPayButton = new Button
@@ -637,6 +659,7 @@ namespace Inventory
             switch (keyData)
             {
                 case Keys.Control | Keys.P: ReprintLast(); return true;
+                case Keys.Control | Keys.M: if (_voiceButton.Visible) _ = VoiceAsync(); return true;
                 case Keys.F1: FocusScan(); return true;
                 case Keys.F2: SetQuantity(); return true;
                 case Keys.F3: _ = UnpaidAsync(); return true;
@@ -835,6 +858,136 @@ namespace Inventory
                 ShowStatus("Search failed: " + ex.Message, Color.Salmon);
             }
         }
+
+        #region Voice order
+
+        // Voice order (back office: Item > POS buttons, "Voice order on the cashier"): the cashier presses Voice (Ctrl+M),
+        // says the items - "1 pepsi can, 3 bread", English or Arabic - and presses Stop. OpenAI writes it out
+        // (InvoiceReader.TranscribeAsync) and reads it into quantity + item (ReadSpokenSaleAsync); each item is then
+        // found like a typed name and added. Several matches: the picker; not found: listed in the status line.
+        public const string VoiceSetting = "pos_voice_order";   // "1" = shown (fn_setting)
+        private const string VoicePrompt = "A cashier says what a customer buys: quantities and products, sometimes the packaging " +
+                                           "(can, bottle, box, pack, kg). English or Arabic (Lebanese), often mixed.";
+        private static readonly Color VoiceBlue = Color.FromArgb(29, 78, 160);
+        private readonly Ai.VoiceRecorder _recorder = new();
+        private readonly System.Windows.Forms.Timer _voiceLimit = new() { Interval = 30_000 };   // a recording stops after 30 s
+        private Button _voiceButton = null!;
+        private bool _voiceBusy;
+
+        /// <summary>Shows or hides the Voice button as set in the back office (also called when that setting changes).</summary>
+        public async Task LoadVoiceSettingAsync()
+        {
+            try { _voiceButton.Visible = await _saleRepository.GetSettingAsync(VoiceSetting, "0") == "1"; }
+            catch { _voiceButton.Visible = false; }
+            if (!_voiceButton.Visible && _recorder.IsRecording)
+            {
+                _recorder.Cancel();
+                _voiceLimit.Stop();
+                ShowVoiceButton(recording: false);
+            }
+        }
+
+        private void ShowVoiceButton(bool recording)
+        {
+            _voiceButton.Text = recording ? "■ Stop" : "🎤 Voice";
+            _voiceButton.BackColor = recording ? ReturnRed : VoiceBlue;
+        }
+
+        // First press: record. Second press (or 30 s): stop, read it and add the items.
+        private async Task VoiceAsync()
+        {
+            if (_voiceBusy || _saving) return;
+            if (!_recorder.IsRecording)
+            {
+                try { _recorder.Start(); }
+                catch (Exception ex) { ShowStatus(ex.Message, Color.Salmon); return; }
+                ShowVoiceButton(recording: true);
+                _voiceLimit.Start();
+                ShowStatus("Listening... say the items (\"1 pepsi can, 3 bread\"), then press Stop.", Color.FromArgb(120, 220, 190));
+                return;
+            }
+
+            _voiceLimit.Stop();
+            ShowVoiceButton(recording: false);
+            string path;
+            try { path = _recorder.Stop(); }
+            catch (Exception ex) { ShowStatus(ex.Message, Color.Salmon); return; }
+
+            _voiceBusy = true;
+            _voiceButton.Enabled = false;
+            _voiceButton.Text = "Reading...";
+            try
+            {
+                ShowStatus("Reading the voice note...", Color.Gainsboro);
+                var text = await Ai.InvoiceReader.TranscribeAsync(path, prompt: VoicePrompt);
+                var order = await Ai.InvoiceReader.ReadSpokenSaleAsync(text);
+                if (order.Lines.Count == 0)
+                {
+                    ShowStatus($"No item understood in: \"{text}\"", Color.Khaki);
+                    return;
+                }
+
+                var missed = new List<string>();
+                var added = 0;
+                foreach (var line in order.Lines)
+                {
+                    var item = await FindSpokenItemAsync(line);
+                    if (item != null && AddItem(item, line.Quantity > 0 ? line.Quantity : 1)) added++;
+                    else missed.Add(line.Text.Length > 0 ? line.Text : line.ItemName);
+                }
+                if (missed.Count == 0) ShowStatus($"Added {added} item(s)  ·  heard: \"{text}\"", Color.FromArgb(120, 220, 190));
+                else
+                {
+                    System.Media.SystemSounds.Hand.Play();
+                    ShowStatus($"Not added: {string.Join(", ", missed)}  ·  heard: \"{text}\"", Color.Khaki);
+                }
+            }
+            catch (Exception ex)
+            {
+                ShowStatus("Voice: " + ex.Message, Color.Salmon);
+            }
+            finally
+            {
+                try { File.Delete(path); } catch { /* a temp file */ }
+                _voiceBusy = false;
+                _voiceButton.Enabled = true;
+                ShowVoiceButton(recording: false);
+                FocusScan();
+            }
+        }
+
+        // The name with its packaging first ("pepsi can"), then the name alone; as said, then in the other language.
+        // Several matches: the one with the packaging said, else the cashier picks. null = not found or not picked.
+        private async Task<PosItemModel?> FindSpokenItemAsync(Ai.AiInvoiceLine line)
+        {
+            var names = new[] { line.ItemName, line.ItemNameAlt }
+                .Where(n => !string.IsNullOrWhiteSpace(n)).Select(n => n!.Trim()).Distinct().ToList();
+            var searches = names.Select(n => string.IsNullOrWhiteSpace(line.Packaging) ? null : $"{n} {line.Packaging.Trim()}")
+                .Concat(names).OfType<string>().ToList();
+
+            var matches = new List<PosItemModel>();
+            foreach (var search in searches)
+            {
+                matches = _items.Find(search);
+                if (matches.Count == 0)
+                {
+                    matches = (await _saleRepository.FindItemAsync(search)).ToList();
+                    _items.Remember(matches);
+                }
+                if (matches.Count > 0) break;
+            }
+            if (matches.Count <= 1) return matches.FirstOrDefault();
+
+            if (!string.IsNullOrWhiteSpace(line.Packaging))
+            {
+                var withPackaging = matches.Where(m => m.PackagingName.Contains(line.Packaging.Trim(), StringComparison.OrdinalIgnoreCase)).ToList();
+                if (withPackaging.Count == 1) return withPackaging[0];
+            }
+            using var picker = new PackagingPickerForm(matches, line.Text.Length > 0 ? line.Text : line.ItemName);
+            return picker.ShowDialog(this) == DialogResult.OK ? picker.SelectedItem as PosItemModel : null;
+        }
+
+        #endregion
 
         // The same packaging at the same price adds to its line; otherwise a new line. False when not added.
         private bool AddItem(PosItemModel item, decimal quantity)
