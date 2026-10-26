@@ -56,6 +56,20 @@ BEGIN
 END $$;
 CREATE INDEX IF NOT EXISTS ix_purchase_return_of ON public.purchase_invoices (return_of_id) WHERE return_of_id IS NOT NULL;
 
+-- ---------------------------------------------------------------------------
+-- Discount per line: an amount off the whole line, in the purchase currency (the screen also takes "10%").
+--   line_total = quantity x unit_cost - discount
+-- The cost posted to the items comes from line_total, so a line discount lowers that item's cost only;
+-- the invoice discount (purchase_invoices.discount) is still spread over every line.
+-- ---------------------------------------------------------------------------
+ALTER TABLE public.purchase_lines ADD COLUMN IF NOT EXISTS discount numeric(18,4) NOT NULL DEFAULT 0;
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'purchase_lines_discount_check') THEN
+        ALTER TABLE public.purchase_lines ADD CONSTRAINT purchase_lines_discount_check CHECK (discount >= 0);
+    END IF;
+END $$;
+
 CREATE OR REPLACE VIEW public.v_purchase_list AS
  SELECT pi.purchase_id,
     pi.purchase_no,
@@ -162,14 +176,14 @@ CREATE OR REPLACE FUNCTION public.fn_purchase_get_lines(p_purchase_id integer)
 RETURNS TABLE (
     purchase_line_id integer, product_id integer, packaging_id integer, item_name text, packaging_name varchar,
     barcode varchar, quantity numeric, factor numeric, base_qty numeric, base_unit varchar, is_weighted boolean,
-    unit_cost numeric, line_total numeric)
+    unit_cost numeric, discount numeric, line_total numeric)
 LANGUAGE sql STABLE
 AS $$
     SELECT l.purchase_line_id, l.product_id, l.packaging_id,
            fn_item_description(p.name::text, p.size::text, p.color::text, NULL),
            pk.name, pk.barcode,
            l.quantity, l.factor, l.base_qty, p.base_unit, p.is_weighted,
-           l.unit_cost, l.line_total
+           l.unit_cost, l.discount, l.line_total
     FROM purchase_lines l
     JOIN products p           ON p.product_id = l.product_id
     JOIN product_packaging pk ON pk.packaging_id = l.packaging_id
@@ -384,12 +398,18 @@ BEGIN
                WHERE x.unit_cost IS NULL OR x.unit_cost < 0) THEN
         RAISE EXCEPTION 'Unit cost cannot be empty or negative.';
     END IF;
+    IF EXISTS (SELECT 1 FROM jsonb_to_recordset(coalesce(p_lines, '[]'::jsonb)) AS x(quantity numeric, unit_cost numeric, discount numeric)
+               WHERE coalesce(x.discount, 0) < 0 OR coalesce(x.discount, 0) > round(x.quantity * x.unit_cost, 2)) THEN
+        RAISE EXCEPTION 'A line discount must be between 0 and the line amount.';
+    END IF;
 
-    INSERT INTO purchase_lines (purchase_id, product_id, packaging_id, quantity, factor, unit_cost, line_total)
-    SELECT v_id, pk.product_id, pk.packaging_id, x.quantity, pk.factor, x.unit_cost, round(x.quantity * x.unit_cost, 2)
+    INSERT INTO purchase_lines (purchase_id, product_id, packaging_id, quantity, factor, unit_cost, discount, line_total)
+    SELECT v_id, pk.product_id, pk.packaging_id, x.quantity, pk.factor, x.unit_cost, x.discount,
+           round(x.quantity * x.unit_cost - x.discount, 2)
     FROM (SELECT (e.item->>'packaging_id')::integer AS packaging_id,
                  (e.item->>'quantity')::numeric    AS quantity,
                  (e.item->>'unit_cost')::numeric   AS unit_cost,
+                 coalesce((e.item->>'discount')::numeric, 0) AS discount,
                  e.n
           FROM jsonb_array_elements(coalesce(p_lines, '[]'::jsonb)) WITH ORDINALITY AS e(item, n)) x
     JOIN product_packaging pk ON pk.packaging_id = x.packaging_id
@@ -460,8 +480,8 @@ BEGIN
     LIMIT 1;
     IF v_bad IS NOT NULL THEN RAISE EXCEPTION '"%" is bought in whole units only.', v_bad; END IF;
 
-    -- Recalculate the totals (never trust what the screen sent)
-    UPDATE purchase_lines SET line_total = round(quantity * unit_cost, 2) WHERE purchase_id = p_purchase_id;
+    -- Recalculate the totals (never trust what the screen sent); a line discount lowers that line's cost
+    UPDATE purchase_lines SET line_total = round(quantity * unit_cost - discount, 2) WHERE purchase_id = p_purchase_id;
     SELECT sum(line_total) INTO v_sub FROM purchase_lines WHERE purchase_id = p_purchase_id;
     v_total := v_sub - v_inv.discount;
     IF v_total < 0 THEN RAISE EXCEPTION 'The discount is bigger than the invoice.'; END IF;
@@ -571,7 +591,7 @@ BEGIN
     END IF;
 
     -- Totals (never trust what the screen sent)
-    UPDATE purchase_lines SET line_total = round(quantity * unit_cost, 2) WHERE purchase_id = p_purchase_id;
+    UPDATE purchase_lines SET line_total = round(quantity * unit_cost - discount, 2) WHERE purchase_id = p_purchase_id;
     SELECT sum(line_total) INTO v_sub FROM purchase_lines WHERE purchase_id = p_purchase_id;
     v_total := v_sub - v_inv.discount;
     IF v_total < 0 THEN RAISE EXCEPTION 'The discount is bigger than the return.'; END IF;
@@ -624,16 +644,17 @@ END $$;
 -- AI invoice reading: the items that best match one line read from a supplier's invoice photo or a voice note.
 -- p_text = the item as written / said ("pepsi bix", "سيدرز قديم"), p_text_alt = the same name in the other script
 -- ("Cedars Old") or NULL: the better of the two counts. p_packaging = the packaging read (box, pack, bottle)
--- or NULL, p_barcode = a barcode printed on the line or NULL.
+-- or NULL, p_barcode = a barcode printed on the line or NULL, p_pack_size = how many pieces are in the packaging
+-- bought (an invoice's "Unit" column: 24, 12...) or NULL: then the packaging that contains that many wins.
 -- Fuzzy text match (pg_trgm) on normalized text (fn_text_normalize: "أحمر" = "احمر"), so spelling mistakes still
 -- match; an exact barcode always wins (score 1).
 -- score 0..1: about 0.5 and more is a good match. Only packagings that can be purchased.
 -- ---------------------------------------------------------------------------
 DROP FUNCTION IF EXISTS public.fn_purchase_match_packaging(text, text, text, integer);
-DROP FUNCTION IF EXISTS public.fn_purchase_match_packaging(text, text, text, text, integer);
+DROP FUNCTION IF EXISTS public.fn_purchase_match_packaging(text, text, text, integer, text);
 CREATE OR REPLACE FUNCTION public.fn_purchase_match_packaging(
     p_text text, p_packaging text DEFAULT NULL, p_barcode text DEFAULT NULL, p_limit integer DEFAULT 5,
-    p_text_alt text DEFAULT NULL)
+    p_text_alt text DEFAULT NULL, p_pack_size numeric DEFAULT NULL)
 RETURNS TABLE (
     packaging_id integer, product_id integer, item_name text, packaging_name varchar,
     barcode varchar, factor numeric, base_unit varchar, is_weighted boolean, last_cost numeric, score numeric)
@@ -643,7 +664,8 @@ AS $$
         SELECT fn_text_normalize(coalesce(nullif(trim(p_text), ''), '?')) AS t,
                fn_text_normalize(coalesce(nullif(trim(p_text_alt), ''), '?')) AS t2,
                lower(nullif(trim(p_packaging), '')) AS pk,
-               nullif(trim(p_barcode), '') AS bc
+               nullif(trim(p_barcode), '') AS bc,
+               CASE WHEN p_pack_size > 0 THEN p_pack_size END AS ps
     ),
     names AS (
         SELECT pk.packaging_id, p.product_id, pk.name AS pack_name, pk.barcode, pk.factor, pk.is_default,
@@ -656,25 +678,36 @@ AS $$
         JOIN products p ON p.product_id = pk.product_id
         WHERE pk.is_active AND pk.can_purchase AND p.is_active AND p.product_type = 1
     ),
-    candidates AS (
-        SELECT n.packaging_id, n.product_id, n.item_name,
-               n.pack_name AS packaging_name, n.barcode, n.factor, n.base_unit, n.is_weighted,
-               round(n.avg_cost * n.factor, 2) AS last_cost,
-               -- name similarity counts for 85%, the packaging read on the invoice (box / pack / bottle...) for 15%,
-               -- so the right packaging of the right item scores highest
-               CASE WHEN i.bc IS NOT NULL AND n.barcode = i.bc THEN 1.0
-                    ELSE least(0.99,
-                         0.85 * greatest(similarity(i.t, n.n_name), word_similarity(i.t, n.n_full), similarity(i.t, n.n_pack),
-                                         similarity(i.t2, n.n_name), word_similarity(i.t2, n.n_full), similarity(i.t2, n.n_pack))
-                         + CASE WHEN i.pk IS NULL THEN (CASE WHEN n.is_default THEN 0.10 ELSE 0.05 END)
-                                WHEN lower(n.pack_name) = i.pk OR similarity(lower(n.pack_name), i.pk) > 0.4 THEN 0.15
-                                -- "pack", "carton", "case", "bp"... on the invoice = a packaging of several units
-                                WHEN i.pk IN ('pack', 'packet', 'carton', 'case', 'box', 'bx', 'bp', 'dozen', 'tray', 'bundle', 'crate')
-                                     AND n.factor > 1 THEN 0.12
-                                ELSE 0 END)
-               END::numeric(5,3) AS score
+    scored AS (
+        SELECT n.*, i.pk, i.bc, i.ps,
+               greatest(similarity(i.t, n.n_name), word_similarity(i.t, n.n_full), similarity(i.t, n.n_pack),
+                        similarity(i.t2, n.n_name), word_similarity(i.t2, n.n_full), similarity(i.t2, n.n_pack)) AS name_sim
         FROM names n
         CROSS JOIN input i
+    ),
+    candidates AS (
+        SELECT s.packaging_id, s.product_id, s.item_name,
+               s.pack_name AS packaging_name, s.barcode, s.factor, s.base_unit, s.is_weighted,
+               round(s.avg_cost * s.factor, 2) AS last_cost,
+               -- The barcode read on the line: sure only when the name agrees too. A photo read slanted can give the
+               -- barcode of the row above or below: then this item scores low and the item named on the line wins.
+               -- Otherwise: name similarity counts for 85%, the packaging read on the invoice for 15%, so the right
+               -- packaging of the right item scores highest: the one that contains the pack size read (24), else the
+               -- one named like the packaging read (box / pack / bottle...).
+               CASE WHEN s.bc IS NOT NULL AND s.barcode = s.bc
+                    THEN CASE WHEN s.name_sim >= 0.3 THEN 1.0 ELSE 0.3 + s.name_sim END
+                    ELSE least(0.99,
+                         0.85 * s.name_sim
+                         + CASE WHEN s.ps IS NOT NULL THEN (CASE WHEN s.factor = s.ps THEN 0.15
+                                                                 WHEN s.ps > 1 AND s.factor > 1 THEN 0.03 ELSE 0 END)
+                                WHEN s.pk IS NULL THEN (CASE WHEN s.is_default THEN 0.10 ELSE 0.05 END)
+                                WHEN lower(s.pack_name) = s.pk OR similarity(lower(s.pack_name), s.pk) > 0.4 THEN 0.15
+                                -- "pack", "carton", "case", "bp"... on the invoice = a packaging of several units
+                                WHEN s.pk IN ('pack', 'packet', 'carton', 'case', 'box', 'bx', 'bp', 'dozen', 'tray', 'bundle', 'crate')
+                                     AND s.factor > 1 THEN 0.12
+                                ELSE 0 END)
+               END::numeric(5,3) AS score
+        FROM scored s
     )
     SELECT c.packaging_id, c.product_id, c.item_name, c.packaging_name, c.barcode, c.factor, c.base_unit,
            c.is_weighted, c.last_cost, greatest(c.score, 0)

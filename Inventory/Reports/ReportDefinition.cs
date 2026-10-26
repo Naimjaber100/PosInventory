@@ -25,8 +25,8 @@ namespace Inventory.Reports
         /// <summary>Shows the period filter; false for a report of how things are now (no dates).</summary>
         public virtual bool UsesPeriodFilter => true;
 
-        /// <summary>The period the report opens with (This month by default).</summary>
-        public virtual (DateTime From, DateTime To) DefaultPeriod => (new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1), DateTime.Today);
+        /// <summary>The period the report opens with (today by default; This week / This month... are one click away).</summary>
+        public virtual (DateTime From, DateTime To) DefaultPeriod => (DateTime.Today, DateTime.Today);
 
         public abstract Task<ReportResult> LoadAsync(ReportFilter filter);
 

@@ -75,12 +75,14 @@ namespace Inventory.Printing
                     : $"Amounts in {currency.Code}   ·   1 {currency.Code} = {currencies.Primary.Format(header.CurrencyRate)}",
                 Columns =
                 {
-                    new("#", 0.05f, Right: true), new("Item", 0.33f), new("Packaging", 0.11f), new("Barcode", 0.14f),
-                    new("Qty", 0.08f, Right: true), new($"Unit cost ({currency.Code})", 0.14f, Right: true), new($"Total ({currency.Code})", 0.15f, Right: true),
+                    new("#", 0.04f, Right: true), new("Item", 0.28f), new("Packaging", 0.10f), new("Barcode", 0.13f),
+                    new("Qty", 0.07f, Right: true), new($"Unit cost ({currency.Code})", 0.13f, Right: true),
+                    new("Discount", 0.11f, Right: true), new($"Total ({currency.Code})", 0.14f, Right: true),
                 },
                 Rows = lines.Select((l, i) => new[]
                 {
-                    (i + 1).ToString(), l.ItemName, l.PackagingName, l.Barcode ?? string.Empty, Qty(l.Quantity), Money(l.UnitCost), Money(l.LineTotal),
+                    (i + 1).ToString(), l.ItemName, l.PackagingName, l.Barcode ?? string.Empty, Qty(l.Quantity), Money(l.UnitCost),
+                    l.Discount > 0 ? Money(l.Discount) : string.Empty, Money(l.LineTotal),
                 }).ToList(),
                 Totals = totals,
                 Notes = header.Notes,

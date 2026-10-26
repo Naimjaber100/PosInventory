@@ -49,11 +49,13 @@ namespace Inventory.Repositories
         /// The packagings that best match a line read from an invoice photo or a voice note (fuzzy name, packaging, barcode),
         /// best first. textAlt = the same name in the other script (Arabic / Latin): the better of the two counts.
         /// </summary>
-        public async Task<List<PackagingLookupModel>> MatchPackagingAsync(string text, string? packaging, string? barcode, int limit = 5, string? textAlt = null)
+        public async Task<List<PackagingLookupModel>> MatchPackagingAsync(string text, string? packaging, string? barcode, int limit = 5, string? textAlt = null,
+            decimal? packSize = null)
         {
             var parameters = new DynamicParameters();
             parameters.Add("p_text", text);
             parameters.Add("p_text_alt", textAlt, DbType.String);
+            parameters.Add("p_pack_size", packSize, DbType.Decimal);
             parameters.Add("p_packaging", packaging, DbType.String);
             parameters.Add("p_barcode", barcode, DbType.String);
             parameters.Add("p_limit", limit);
@@ -75,7 +77,7 @@ namespace Inventory.Repositories
             parameters.Add("p_invoice_date", header.InvoiceDate.Date, DbType.Date);
             parameters.Add("p_discount", header.Discount);
             parameters.Add("p_notes", header.Notes, DbType.String);
-            parameters.Add("p_lines", new JsonbParameter(lines.Select(l => new { l.PackagingId, l.Quantity, l.UnitCost })));
+            parameters.Add("p_lines", new JsonbParameter(lines.Select(l => new { l.PackagingId, l.Quantity, l.UnitCost, l.Discount })));
             parameters.Add("p_post", post);
             parameters.Add("p_user_id", userId);
             parameters.Add("p_currency", header.Currency, DbType.String);

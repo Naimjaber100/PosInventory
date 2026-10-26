@@ -258,7 +258,8 @@ namespace Inventory
             {
                 var row = new RowData { Line = line };
                 var name = string.IsNullOrWhiteSpace(line.ItemName) ? line.Text : line.ItemName;
-                row.Candidates.AddRange(await _purchaseRepository.MatchPackagingAsync(name, line.Packaging, line.Barcode, textAlt: line.ItemNameAlt));
+                row.Candidates.AddRange(await _purchaseRepository.MatchPackagingAsync(name, line.Packaging, line.Barcode, textAlt: line.ItemNameAlt,
+                    packSize: line.PackSize));
                 if (row.Candidates.Count > 0 && row.Candidates[0].Score >= GoodMatch) row.Chosen = row.Candidates[0];
                 _rows.Add(row);
             }
@@ -287,9 +288,8 @@ namespace Inventory
                 var gridRow = linesGrid.Rows[index];
                 gridRow.Tag = row;
                 gridRow.Cells[useColumn.Index].Value = row.Chosen != null;
-                gridRow.Cells[readColumn.Index].Value = row.Line.Text;
-                gridRow.Cells[qtyColumn.Index].Value = row.Line.Quantity;
-                gridRow.Cells[priceColumn.Index].Value = UnitPriceOf(row.Line);
+                gridRow.Cells[readColumn.Index].Value = row.Line.PackSize is > 1 and var pack ? $"{row.Line.Text}   [pack of {pack:0.##}]" : row.Line.Text;
+                FillAmounts(gridRow);
                 FillItemCell(gridRow);
             }
             UpdateRows();
@@ -298,6 +298,25 @@ namespace Inventory
         // The price of one packaging: written on the line, else line total / quantity
         private static decimal? UnitPriceOf(AiInvoiceLine line) =>
             line.UnitPrice ?? (line.LineTotal is { } t && line.Quantity > 0 ? Math.Round(t / line.Quantity, 2) : null);
+
+        // How many of the chosen packaging one packaging of the invoice makes: the invoice sold a pack of 24 and the
+        // item has no pack of 24 (only pcs) -> 24, so 1 pack at 16.25 becomes 24 pcs at 0.677. 1 when they are the same.
+        private static decimal Multiplier(RowData row) =>
+            row.Line.PackSize is > 0 and var pack && row.Chosen is { Factor: > 0 } chosen && chosen.Factor != pack ? pack / chosen.Factor : 1;
+
+        // Qty and unit price of the line in the chosen packaging (again when another item is chosen)
+        private void FillAmounts(DataGridViewRow gridRow)
+        {
+            var row = (RowData)gridRow.Tag!;
+            var m = Multiplier(row);
+            var price = UnitPriceOf(row.Line);
+            gridRow.Cells[qtyColumn.Index].Value = Math.Round(row.Line.Quantity * m, 3);
+            gridRow.Cells[priceColumn.Index].Value = price is { } p ? Math.Round(p / m, 4) : null;
+            gridRow.Cells[readColumn.Index].ToolTipText = m == 1 ? string.Empty
+                : $"On the invoice: {row.Line.Quantity:0.###} x pack of {row.Line.PackSize:0.##} at {price:0.####}. " +
+                  $"\"{row.Chosen!.ItemName}\" has no packaging of {row.Line.PackSize:0.##}, so it is {row.Line.Quantity * m:0.###} {row.Chosen.PackagingName} " +
+                  $"at {(price is { } q ? Math.Round(q / m, 4) : 0):0.####}. Add a packaging of {row.Line.PackSize:0.##} to the item to buy it as one.";
+        }
 
         private void FillItemCell(DataGridViewRow gridRow)
         {
@@ -328,6 +347,7 @@ namespace Inventory
                 var text = linesGrid.Rows[e.RowIndex].Cells[itemColumn.Index].Value as string;
                 row.Chosen = row.Candidates.FirstOrDefault(c => row.TextOf(c) == text);
                 linesGrid.Rows[e.RowIndex].Cells[useColumn.Index].Value = row.Chosen != null;
+                FillAmounts(linesGrid.Rows[e.RowIndex]);   // in that packaging: pack of 24 -> 24 pcs, or 1 box of 24
             }
             UpdateRows();
         }
@@ -350,16 +370,39 @@ namespace Inventory
                 gridRow.Cells[costColumn.Index].Style.ForeColor = price == null ? Color.DarkGoldenrod : Color.FromArgb(22, 32, 43);
                 gridRow.Cells[costColumn.Index].ToolTipText = price == null ? "No price was read: the item's last cost is used. Check it." : string.Empty;
                 gridRow.DefaultCellStyle.BackColor = row.Chosen == null ? Color.FromArgb(255, 241, 241) : Color.White;
+
+                // Qty x price that is not the line's total on the invoice: a number was read from another row
+                var problem = InvoiceReader.RowProblem(row.Line.Text, ParseDecimal(gridRow.Cells[qtyColumn.Index].Value), price, row.Line.LineTotal);
+                foreach (var column in new[] { qtyColumn, priceColumn })
+                {
+                    gridRow.Cells[column.Index].Style.BackColor = problem != null ? Color.FromArgb(255, 214, 208) : Color.Empty;
+                    gridRow.Cells[column.Index].ToolTipText = problem != null ? $"Check Qty and Unit price on the invoice: {problem}." : string.Empty;
+                }
             }
 
             var ready = ReadyRows().Count();
             var missing = linesGrid.Rows.Cast<DataGridViewRow>().Count(r => r.Tag is RowData { Chosen: null });
+            var wrong = linesGrid.Rows.Cast<DataGridViewRow>().Count(r => r.Cells[qtyColumn.Index].Style.BackColor != Color.Empty);
             summaryLabel.Text = linesGrid.Rows.Count == 0 ? string.Empty
-                : $"{ready} line(s) ready" + (missing > 0 ? $"   ·   {missing} need an item (red): choose one, use \"Find item...\", or untick" : string.Empty);
+                : $"{ready} line(s) ready" + (missing > 0 ? $"   ·   {missing} need an item (red): choose one, use \"Find item...\", or untick" : string.Empty)
+                  + (wrong > 0 ? $"   ·   {wrong} where Qty x Price ≠ the line total (red cells): check them on the invoice" : string.Empty)
+                  + TotalCheck();
             addButton.Enabled = ready > 0;
             addButton.Text = ready == 1 ? "Add 1 line to the purchase" : $"Add {ready} lines to the purchase";
             var currency = SelectedCurrency;
             rateLabel.Text = currency == null || currency.IsPrimary ? string.Empty : currency.RateText;
+        }
+
+        // The lines as they are now (qty x price) against the invoice's total before discount
+        private string TotalCheck()
+        {
+            if (_invoice?.Total is not > 0 || linesGrid.Rows.Count == 0) return string.Empty;
+            var expected = _invoice.Total.Value + (_invoice.Discount ?? 0);
+            var sum = linesGrid.Rows.Cast<DataGridViewRow>()
+                .Sum(r => (ParseDecimal(r.Cells[qtyColumn.Index].Value) ?? 0) * (ParseDecimal(r.Cells[priceColumn.Index].Value) ?? 0));
+            return Math.Abs(sum - expected) <= 0.02m
+                ? $"   ·   lines add up to the invoice total ({expected:#,0.##}) ✓"
+                : $"   ·   lines add up to {sum:#,0.##}, the invoice says {expected:#,0.##}: a line is misread or missing";
         }
 
         private IEnumerable<DataGridViewRow> ReadyRows() =>
@@ -405,6 +448,7 @@ namespace Inventory
                 row.Candidates.RemoveAll(c => c.PackagingId == chosen.PackagingId);
                 row.Candidates.Insert(0, chosen);
                 row.Chosen = chosen;
+                FillAmounts(gridRow);
                 FillItemCell(gridRow);
                 gridRow.Cells[useColumn.Index].Value = true;
                 UpdateRows();

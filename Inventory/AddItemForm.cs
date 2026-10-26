@@ -373,6 +373,7 @@ namespace Inventory
                 {
                     if (item.SalePrice != null) item.SalePrice = Math.Round(item.SalePrice.Value * currency.Rate!.Value, 2);
                     if (item.Cost != null) item.Cost = Math.Round(item.Cost.Value * currency.Rate!.Value, 2);
+                    if (item.LineTotal != null) item.LineTotal = Math.Round(item.LineTotal.Value * currency.Rate!.Value, 2);
                 }
             }
             return notes;
@@ -408,7 +409,10 @@ namespace Inventory
                 _packagings.ResetItem(_packagings.IndexOf(packaging));
             }
 
-            if (item.Cost is > 0 and var cost) costInput.Value = Clamp(Math.Round(cost, 2), costInput);
+            // A cost read for a box of N pieces is N pieces' cost: the item's cost is per base unit
+            var pack = item.PackSize is > 1 and var p ? p : 1;
+            if (item.Cost is > 0 and var cost) costInput.Value = Clamp(Math.Round(cost / pack, 2), costInput);
+            if (pack > 1) notes.Add($"cost read for a {item.Packaging ?? "pack"} of {pack:0.##}: the cost per piece was put; add that packaging below if needed");
             if (item.Quantity is > 0 and var qty && stockInput.Enabled) stockInput.Value = Clamp(qty, stockInput);
             return notes;
         }

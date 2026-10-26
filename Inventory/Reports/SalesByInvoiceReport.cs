@@ -20,8 +20,6 @@ namespace Inventory.Reports
         public override string Description =>
             "Every sale and return invoice with its total, cost and profit. Returns are negative, so the total is the net.";
 
-        public override (DateTime From, DateTime To) DefaultPeriod => (DateTime.Today, DateTime.Today);
-
         public override string? DoubleClickHint => "Double-click an invoice to see its receipt.";
 
         public override async Task<ReportResult> LoadAsync(ReportFilter filter)

@@ -3,12 +3,13 @@ using System.Runtime.CompilerServices;
 
 namespace Inventory.Models
 {
-    // One editable line in the purchase add / edit grid. Only Qty and Unit cost can be edited;
+    // One editable line in the purchase add / edit grid. Qty, Unit cost and Discount can be edited;
     // Line total follows them (PropertyChanged keeps the grid and the totals up to date).
     public class PurchaseEditLine : INotifyPropertyChanged
     {
         private decimal _quantity;
         private decimal _unitCost;
+        private decimal _discount;
 
         [Browsable(false)] public int PackagingId { get; init; }
         [Browsable(false)] public int ProductId { get; init; }
@@ -33,8 +34,16 @@ namespace Inventory.Models
             set { if (_unitCost == value) return; _unitCost = value; OnPropertyChanged(); OnPropertyChanged(nameof(LineTotal)); }
         }
 
+        /// <summary>Amount off the whole line, in the purchase currency (typed as an amount or "10%").</summary>
+        [DisplayName("Discount")]
+        public decimal Discount
+        {
+            get => _discount;
+            set { if (_discount == value) return; _discount = value; OnPropertyChanged(); OnPropertyChanged(nameof(LineTotal)); }
+        }
+
         [DisplayName("Line total")]
-        public decimal LineTotal => Math.Round(Quantity * UnitCost, 2);
+        public decimal LineTotal => Math.Round(Quantity * UnitCost - Discount, 2);
 
         public event PropertyChangedEventHandler? PropertyChanged;
 

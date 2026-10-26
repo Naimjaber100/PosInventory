@@ -27,6 +27,7 @@ namespace Inventory.Ai
         [JsonPropertyName("item_name")] public string ItemName { get; set; } = string.Empty;  // cleaned up, in the script it was written / said in
         [JsonPropertyName("item_name_alt")] public string? ItemNameAlt { get; set; }          // the same name in the other script (سيدرز <-> Cedars), or null
         [JsonPropertyName("packaging")] public string? Packaging { get; set; }                // box, pack, bottle, can, kg...
+        [JsonPropertyName("pack_size")] public decimal? PackSize { get; set; }                // pieces in one packaging bought (الوحدة 24), or null
         [JsonPropertyName("quantity")] public decimal Quantity { get; set; }
         [JsonPropertyName("unit_price")] public decimal? UnitPrice { get; set; }
         [JsonPropertyName("line_total")] public decimal? LineTotal { get; set; }
@@ -49,6 +50,9 @@ namespace Inventory.Ai
         [JsonPropertyName("cost")] public decimal? Cost { get; set; }
         [JsonPropertyName("quantity")] public decimal? Quantity { get; set; }
         [JsonPropertyName("currency")] public string? Currency { get; set; }       // ISO code: LBP, USD...
+        [JsonPropertyName("packaging")] public string? Packaging { get; set; }     // the unit it is listed in: box, piece, jar...
+        [JsonPropertyName("pack_size")] public decimal? PackSize { get; set; }     // pieces in that packaging ("*24" -> 24)
+        [JsonPropertyName("line_total")] public decimal? LineTotal { get; set; }   // a list's Total column: checks quantity x cost
     }
 
     // Turns a photo of a supplier's invoice, or a voice note listing what was bought, into structured purchase lines
@@ -73,12 +77,20 @@ namespace Inventory.Ai
               "Basmati rice" -> "رز بسمتي"). null only for a code or number that has no other form.
             - packaging: the packaging or unit if written, in English, singular: box, pack, carton, bottle, can, piece, kg...
               Common short forms: "bx" = box, "bp" / "pk" = pack, "ctn" = carton, "pc" / "pcs" = piece. null if not written.
+            - pack_size: how many pieces are in ONE of the packagings bought, when the invoice shows it: a Unit / Pack / Pcs
+              column holding a number ("الوحدة" 24, "التعبئة" 12, "Unit 30"), or the name ("*24", "x12", "24'S", "6 pcs").
+              1 when that number is 1 or the line is per piece. null when it is not written. It is not the size (330ml, 8G)
+              and not the quantity: on "الكمية 2 · الوحدة 12 · السعر 13" quantity is 2, pack_size is 12, unit_price is 13.
             - quantity: the number of packagings bought.
             - unit_price: price of ONE packaging; null if not written. line_total: the line amount; null if not written.
             - barcode: only if a barcode / EAN is printed on that line; else null.
             Numbers: plain numbers without thousands separators (12500, not 12,500). If only line_total is written, still give it.
             Also give, when visible: supplier_name, invoice_number, invoice_date (YYYY-MM-DD), currency (ISO code: USD for $, LBP for L.L / ل.ل),
             discount (amount) and total. Use null for anything you cannot read; never guess numbers.
+            Rows: read each row straight across the page: its barcode, name, quantity, unit price and total are on the same row,
+            even when the photo is slanted or the paper is folded. Check every row: quantity x unit_price must equal its line_total;
+            if it does not, a number was taken from the row above or below - read that row again. The line totals must add up to
+            the invoice's total before discount.
             """;
 
         // Strict JSON schema: the model must answer exactly this shape
@@ -100,12 +112,13 @@ namespace Inventory.Ai
                   "items": {
                     "type": "object",
                     "additionalProperties": false,
-                    "required": ["text", "item_name", "item_name_alt", "packaging", "quantity", "unit_price", "line_total", "barcode"],
+                    "required": ["text", "item_name", "item_name_alt", "packaging", "pack_size", "quantity", "unit_price", "line_total", "barcode"],
                     "properties": {
                       "text":       { "type": "string" },
                       "item_name":  { "type": "string" },
                       "item_name_alt": { "type": ["string", "null"] },
                       "packaging":  { "type": ["string", "null"] },
+                      "pack_size":  { "type": ["number", "null"] },
                       "quantity":   { "type": "number" },
                       "unit_price": { "type": ["number", "null"] },
                       "line_total": { "type": ["number", "null"] },
@@ -137,6 +150,7 @@ namespace Inventory.Ai
               "بيض" -> "eggs", "rice basmati" -> "رز بسمتي", "حلوم" -> "halloumi cheese"). null only for a code or number.
             - packaging: box, pack, carton, bottle, can, piece, kg... in English, singular ("علبة"/"كرتونة" -> box / carton,
               "كروز" (of cigarettes) -> carton, "قنينة" -> bottle, "كيلو" -> kg, "bp" / "pk" -> pack); null if not said.
+            - pack_size: how many pieces are in one of those packagings when it is said ("a box of 24" -> 24); else null.
             - quantity: the number of packagings; 1 when no number was said.
             - unit_price / line_total: only when a price was said ("at 9 dollars each" -> unit_price 9); else null.
             - barcode: null.
@@ -164,6 +178,16 @@ namespace Inventory.Ai
             - cost: the cost / purchase price only if it is written as such (e.g. "cost 1.2"); null otherwise.
             - quantity: the quantity in stock only if it is written (e.g. "qty 24"); null otherwise.
             - currency: ISO code of the prices (USD for $, LBP for L.L / ل.ل); null if no price or no sign.
+            - packaging: the unit the item is listed in, in English, singular: box, piece, jar, pack, carton, bag, bottle...
+              ("علبة" = box, "PC" / "PCS" = piece, "JAR" = jar, "كرتونة" = carton, "ربطة" = pack); null if not written.
+            - pack_size: how many pieces are in that packaging, when written: in the name ("KINDER T4 *20" -> 20,
+              "GUM 8G*60" -> 60, "12CM*6" -> 6, "20*5" -> 100, "x24" / "24'S" / "24 pcs" -> 24) or in a pack column.
+              null when the item is listed per piece or the number is not written. Do not take the size (8G, 130G, 612.5G) for it.
+            - line_total: the line amount if the list has a Total / Amount column; null otherwise.
+            A supplier's invoice or sales invoice (columns like Item / Barcode, Name, Unit, Qty, Unit Price, Disc, Total):
+            the Item / code column is the barcode; Unit Price is the cost of ONE packaging (put it in cost, not sale_price);
+            Qty is quantity. Read each row straight across: the barcode, name, qty and price of a row are on the same line.
+            Barcodes: read them digit by digit, they are long (13 digits for EAN-13); never fill a digit you cannot see.
             Numbers: plain numbers without thousands separators (12500, not 12,500). Use null for anything you cannot read; never guess.
             """;
 
@@ -179,7 +203,7 @@ namespace Inventory.Ai
                   "items": {
                     "type": "object",
                     "additionalProperties": false,
-                    "required": ["item_name", "barcode", "size", "sale_price", "cost", "quantity", "currency"],
+                    "required": ["item_name", "barcode", "size", "sale_price", "cost", "quantity", "currency", "packaging", "pack_size", "line_total"],
                     "properties": {
                       "item_name":  { "type": ["string", "null"] },
                       "barcode":    { "type": ["string", "null"] },
@@ -187,7 +211,10 @@ namespace Inventory.Ai
                       "sale_price": { "type": ["number", "null"] },
                       "cost":       { "type": ["number", "null"] },
                       "quantity":   { "type": ["number", "null"] },
-                      "currency":   { "type": ["string", "null"] }
+                      "currency":   { "type": ["string", "null"] },
+                      "packaging":  { "type": ["string", "null"] },
+                      "pack_size":  { "type": ["number", "null"] },
+                      "line_total": { "type": ["number", "null"] }
                     }
                   }
                 }
@@ -195,13 +222,65 @@ namespace Inventory.Ai
             }
             """)!;
 
-        /// <summary>Reads a photo of a supplier's invoice.</summary>
+        /// <summary>Reads a photo of a supplier's invoice (read again once when its numbers do not add up).</summary>
         public static Task<AiInvoice> ReadAsync(string imagePath, CancellationToken cancel = default) =>
-            ExtractAsync<AiInvoice>(Instructions, ImageContent(imagePath, "Read this purchase invoice."), "this image", "purchase_invoice", Schema, cancel);
+            ReadCheckedAsync<AiInvoice>(Instructions, imagePath, "Read this purchase invoice.", "purchase_invoice", Schema,
+                // A line on the edge of two strips may come twice
+                invoice => invoice.Lines = invoice.Lines.DistinctBy(l => (l.Text, l.Barcode, l.Quantity, l.UnitPrice, l.LineTotal)).ToList(),
+                InvoiceProblems, cancel);
 
         /// <summary>Reads a photo of one item (product, label, price tag) or a list of items: name, barcode, prices, quantity.</summary>
         public static Task<AiItemList> ReadItemsAsync(string imagePath, CancellationToken cancel = default) =>
-            ExtractAsync<AiItemList>(ItemInstructions, ImageContent(imagePath, "Read the item(s) on this photo."), "this image", "new_items", ItemSchema, cancel);
+            ReadCheckedAsync<AiItemList>(ItemInstructions, imagePath, "Read the item(s) on this photo.", "new_items", ItemSchema,
+                list => list.Items = list.Items.DistinctBy(i => (i.ItemName, i.Barcode, i.Quantity, i.Cost, i.LineTotal)).ToList(),
+                list => list.Items.Select(i => RowProblem(i.ItemName, i.Quantity, i.Cost, i.LineTotal)).OfType<string>().ToList(),
+                cancel);
+
+        /// <summary>Quantity x unit price that is not the line's total (a number read from another row), or null.</summary>
+        public static string? RowProblem(string? name, decimal? quantity, decimal? unitPrice, decimal? lineTotal) =>
+            quantity is > 0 && unitPrice is > 0 && lineTotal is > 0
+            && Math.Abs(quantity.Value * unitPrice.Value - lineTotal.Value) > Math.Max(0.011m, lineTotal.Value * 0.005m)
+                ? $"\"{name}\": {quantity:0.###} x {unitPrice:0.####} = {quantity * unitPrice:0.##}, but its total is {lineTotal:0.##}"
+                : null;
+
+        // Lines whose quantity x price is not their total, and line totals that do not make the invoice's total
+        private static List<string> InvoiceProblems(AiInvoice invoice)
+        {
+            var problems = invoice.Lines.Select(l => RowProblem(l.Text, l.Quantity, l.UnitPrice, l.LineTotal)).OfType<string>().ToList();
+            if (invoice.Total is > 0 && invoice.Lines.Count > 0 && invoice.Lines.All(l => l.LineTotal != null))
+            {
+                var sum = invoice.Lines.Sum(l => l.LineTotal!.Value);
+                var expected = invoice.Total.Value + (invoice.Discount ?? 0);
+                if (Math.Abs(sum - expected) > 0.02m)
+                    problems.Add($"the line totals add up to {sum:0.##}, but the invoice's total before discount is {expected:0.##} (a line is missing, extra or misread)");
+            }
+            return problems;
+        }
+
+        // Reads the photo; when its numbers do not add up, sends it once more with the first reading and what is wrong,
+        // and keeps the reading with fewer problems
+        private static async Task<T> ReadCheckedAsync<T>(string instructions, string imagePath, string ask, string schemaName, JsonNode schema,
+            Action<T> clean, Func<T, List<string>> problemsOf, CancellationToken cancel) where T : class
+        {
+            var first = await ExtractAsync<T>(instructions, ImageContent(imagePath, ask), "this image", schemaName, schema, cancel);
+            clean(first);
+            var problems = problemsOf(first);
+            if (problems.Count == 0) return first;
+
+            var again = ask + "\nYou read this photo once already; that reading (JSON) does not add up:\n- " + string.Join("\n- ", problems.Take(30)) +
+                        "\nLook at those rows on the photo again, straight across each row, and return the WHOLE reading again, corrected " +
+                        "(every row, not only the wrong ones). Your first reading:\n" + JsonSerializer.Serialize(first);
+            try
+            {
+                var second = await ExtractAsync<T>(instructions, ImageContent(imagePath, again), "this image", schemaName, schema, cancel);
+                clean(second);
+                return problemsOf(second).Count < problems.Count ? second : first;
+            }
+            catch (Exception) when (!cancel.IsCancellationRequested)
+            {
+                return first;   // the first reading is still shown, with its problems marked
+            }
+        }
 
         /// <summary>Turns the text of a voice note ("2 pepsi box, 1 unica pack...") into purchase lines.</summary>
         public static Task<AiInvoice> ReadSpokenTextAsync(string text, CancellationToken cancel = default) =>
@@ -215,16 +294,31 @@ namespace Inventory.Ai
         public static Task<AiInvoice> ReadSpokenSaleAsync(string text, CancellationToken cancel = default) =>
             ExtractAsync<AiInvoice>(CashierSpokenInstructions, "Voice note:\n" + text.Trim(), "this voice note", "purchase_invoice", Schema, cancel);
 
-        // The user message: a short text and the photo
-        private static JsonArray ImageContent(string imagePath, string text) => new()
+        // The user message: a short text and the photo. A tall photo (a whole invoice or list) also goes as zoomed strips:
+        // OpenAI shrinks every image to about 768 pixels on its short side, so on a full page the small digits of the
+        // barcodes and prices become a few pixels high; in a strip they are 2-3 times bigger.
+        private static JsonArray ImageContent(string imagePath, string text)
         {
-            new JsonObject { ["type"] = "text", ["text"] = text },
-            new JsonObject
+            var (whole, strips) = PrepareImages(imagePath);
+            var content = new JsonArray
             {
-                ["type"] = "image_url",
-                ["image_url"] = new JsonObject { ["url"] = "data:image/jpeg;base64," + Convert.ToBase64String(PrepareImage(imagePath)), ["detail"] = "high" },
-            },
-        };
+                new JsonObject
+                {
+                    ["type"] = "text",
+                    ["text"] = strips.Count == 0 ? text
+                        : text + $"\nThe first image is the whole photo. The next {strips.Count} images are zoomed strips of it, from top to bottom, " +
+                          "that overlap a little: read the barcodes, numbers and names from the strips, use the whole photo for the columns. " +
+                          "A line on the edge of two strips is in both: return it only once.",
+                },
+            };
+            foreach (var image in strips.Prepend(whole))
+                content.Add(new JsonObject
+                {
+                    ["type"] = "image_url",
+                    ["image_url"] = new JsonObject { ["url"] = "data:image/jpeg;base64," + Convert.ToBase64String(image), ["detail"] = "high" },
+                });
+            return content;
+        }
 
         /// <summary>
         /// Writes out a voice note (wav, mp3, m4a, ogg - e.g. WhatsApp -, webm...): OpenAI speech to text,
@@ -319,18 +413,67 @@ namespace Inventory.Ai
             }
         }
 
-        // The photo as a JPEG at most MaxImageSide pixels on its longest side (phone photos are often 4000+ px)
-        private static byte[] PrepareImage(string path)
+        // The photo as a JPEG at most MaxImageSide pixels on its longest side (phone photos are often 4000+ px),
+        // and, when it is tall (a page), strips of it about 3/4 as high as wide, overlapping by StripOverlap
+        private const int MaxStripWidth = 2000;
+        private const double StripOverlap = 0.15;
+
+        private static (byte[] Whole, List<byte[]> Strips) PrepareImages(string path)
         {
             using var original = Image.FromFile(path);
+            if (original.PropertyIdList.Contains(0x0112)) FixOrientation(original);   // phone photos: turned as they were taken
+
             var scale = Math.Min(1.0, (double)MaxImageSide / Math.Max(original.Width, original.Height));
             using var resized = new Bitmap(original, Math.Max(1, (int)(original.Width * scale)), Math.Max(1, (int)(original.Height * scale)));
+            var whole = Jpeg(resized);
+
+            var strips = new List<byte[]>();
+            if (original.Height > original.Width * 1.3)
+            {
+                // From the full photo (not the smaller one): the strips keep every pixel of the digits
+                var stripScale = Math.Min(1.0, (double)MaxStripWidth / original.Width);
+                var stripHeight = (int)(original.Width * 0.75);
+                var step = (int)(stripHeight * (1 - StripOverlap));
+                for (var top = 0; top < original.Height; top += step)
+                {
+                    var height = Math.Min(stripHeight, original.Height - top);
+                    if (height < stripHeight * 0.3 && strips.Count > 0) break;   // a thin rest is already in the last strip
+                    using var strip = new Bitmap(Math.Max(1, (int)(original.Width * stripScale)), Math.Max(1, (int)(height * stripScale)));
+                    using (var g = Graphics.FromImage(strip))
+                    {
+                        g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                        g.DrawImage(original, new Rectangle(0, 0, strip.Width, strip.Height), new Rectangle(0, top, original.Width, height), GraphicsUnit.Pixel);
+                    }
+                    strips.Add(Jpeg(strip));
+                    if (top + height >= original.Height) break;
+                }
+            }
+            return (whole, strips);
+        }
+
+        private static byte[] Jpeg(Image image)
+        {
             using var stream = new MemoryStream();
             var jpeg = ImageCodecInfo.GetImageEncoders().First(c => c.FormatID == ImageFormat.Jpeg.Guid);
             using var parameters = new EncoderParameters(1);
-            parameters.Param[0] = new EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 85L);
-            resized.Save(stream, jpeg, parameters);
+            parameters.Param[0] = new EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 88L);
+            image.Save(stream, jpeg, parameters);
             return stream.ToArray();
+        }
+
+        // EXIF orientation (tag 0x0112): turn the picture the way the phone was held
+        private static void FixOrientation(Image image)
+        {
+            var flip = image.GetPropertyItem(0x0112)?.Value is { Length: > 0 } value ? value[0] switch
+            {
+                3 => RotateFlipType.Rotate180FlipNone,
+                6 => RotateFlipType.Rotate90FlipNone,
+                8 => RotateFlipType.Rotate270FlipNone,
+                _ => RotateFlipType.RotateNoneFlipNone,
+            } : RotateFlipType.RotateNoneFlipNone;
+            if (flip == RotateFlipType.RotateNoneFlipNone) return;
+            image.RotateFlip(flip);
+            image.RemovePropertyItem(0x0112);
         }
 
         // A clear message for the usual OpenAI errors

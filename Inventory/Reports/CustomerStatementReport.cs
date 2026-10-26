@@ -21,8 +21,6 @@ namespace Inventory.Reports
 
         public override bool UsesCustomerFilter => true;
 
-        public override (DateTime From, DateTime To) DefaultPeriod => (new DateTime(DateTime.Today.Year, 1, 1), DateTime.Today);
-
         public override string? DoubleClickHint => "Double-click an unpaid sale to see the invoices of that day.";
 
         public override async Task<ReportResult> LoadAsync(ReportFilter filter)

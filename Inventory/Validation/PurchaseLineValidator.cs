@@ -44,6 +44,14 @@ namespace Inventory.Validation
             else if (decimal.Round(line.UnitCost, UnitCostDecimals) != line.UnitCost)
                 result.Add($"{where}: unit cost can have at most {UnitCostDecimals} decimals.", nameof(PurchaseEditLine.UnitCost), lineIndex);
 
+            // discount numeric(18,4), between 0 and the line amount (fn_purchase_save checks it too)
+            if (line.Discount < 0)
+                result.Add($"{where}: discount cannot be negative.", nameof(PurchaseEditLine.Discount), lineIndex);
+            else if (line.Discount > Math.Round(line.Quantity * line.UnitCost, 2))
+                result.Add($"{where}: discount is bigger than the line ({line.Quantity * line.UnitCost:#,0.##}).", nameof(PurchaseEditLine.Discount), lineIndex);
+            else if (decimal.Round(line.Discount, UnitCostDecimals) != line.Discount)
+                result.Add($"{where}: discount can have at most {UnitCostDecimals} decimals.", nameof(PurchaseEditLine.Discount), lineIndex);
+
             return result;
         }
 

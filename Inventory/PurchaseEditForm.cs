@@ -65,6 +65,7 @@ namespace Inventory
                 // A corrected cell loses its error mark
                 if (e.RowIndex >= 0 && e.ColumnIndex >= 0) linesGrid[e.ColumnIndex, e.RowIndex].ErrorText = string.Empty;
             };
+            linesGrid.CellParsing += linesGrid_CellParsing;
             dateInput.Value = DateTime.Today;
             UpdateTotals();
         }
@@ -129,6 +130,7 @@ namespace Inventory
                         IsWeighted = l.IsWeighted,
                         Quantity = l.Quantity,
                         UnitCost = l.UnitCost,
+                        Discount = l.Discount,
                     });
                 }
                 await LoadCurrenciesAsync(header.Currency);
@@ -267,6 +269,7 @@ namespace Inventory
         {
             var code = SelectedCurrency?.Code ?? _currencies.Primary.Code;
             if (linesGrid.Columns[nameof(PurchaseEditLine.UnitCost)] is { } cost) cost.HeaderText = $"Unit cost ({code})";
+            if (linesGrid.Columns[nameof(PurchaseEditLine.Discount)] is { } discount) discount.HeaderText = $"Discount ({code} or %)";
             if (linesGrid.Columns[nameof(PurchaseEditLine.LineTotal)] is { } total) total.HeaderText = $"Line total ({code})";
         }
 
@@ -292,7 +295,11 @@ namespace Inventory
         private void ConvertAmounts(decimal factor)
         {
             var decimals = Math.Max(SelectedCurrency?.Decimals ?? 2, (short)2);
-            foreach (var line in _lines) line.UnitCost = Math.Round(line.UnitCost * factor, 4);
+            foreach (var line in _lines)
+            {
+                line.UnitCost = Math.Round(line.UnitCost * factor, 4);
+                line.Discount = Math.Min(Math.Round(line.Discount * factor, 4), Math.Round(line.Quantity * line.UnitCost, 2));
+            }
             discountInput.Value = Math.Min(Math.Round(discountInput.Value * factor, decimals), discountInput.Maximum);
             _lines.ResetBindings();
         }
@@ -627,6 +634,22 @@ namespace Inventory
                 column.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
                 if (!column.ReadOnly) column.DefaultCellStyle.BackColor = Color.FromArgb(255, 252, 230);   // editable cells
             }
+        }
+
+        // Discount: an amount, or a percent of the line ("10%" = 10 % of qty x unit cost); blank = no discount
+        private void linesGrid_CellParsing(object? sender, DataGridViewCellParsingEventArgs e)
+        {
+            if (linesGrid.Columns[e.ColumnIndex].DataPropertyName != nameof(PurchaseEditLine.Discount)) return;
+            if (linesGrid.Rows[e.RowIndex].DataBoundItem is not PurchaseEditLine line) return;
+            var text = e.Value?.ToString()?.Trim() ?? string.Empty;
+            var percent = text.EndsWith('%');
+            if (percent) text = text[..^1].Trim();
+            if (text.Length == 0) { e.Value = 0m; e.ParsingApplied = true; return; }
+            if (!decimal.TryParse(text, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.CurrentCulture, out var value)
+                && !decimal.TryParse(text, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out value))
+                return;   // not a number: DataError says so
+            e.Value = percent ? Math.Round(line.Quantity * line.UnitCost * value / 100, 4) : value;
+            e.ParsingApplied = true;
         }
 
         private void linesGrid_DataError(object? sender, DataGridViewDataErrorEventArgs e)

@@ -23,6 +23,10 @@
     <None Update="appsettings.local.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <!-- Installation kit, in the publish folder only: Deploy\Setup-Server.cmd / Setup-Station.cmd and the database scripts -->
+    <None Update="Deploy\*.sql;Deploy\*.ps1;Deploy\*.cmd;Database\*.sql">
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </None>
   </ItemGroup>
 
 </Project>

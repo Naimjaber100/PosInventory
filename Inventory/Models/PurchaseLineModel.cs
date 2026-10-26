@@ -17,6 +17,7 @@ namespace Inventory.Models
         [DisplayName("Unit")] public string BaseUnit { get; set; } = string.Empty;
         [Browsable(false)] public bool IsWeighted { get; set; }
         [DisplayName("Unit cost")] public decimal UnitCost { get; set; }
+        [DisplayName("Discount")] public decimal Discount { get; set; }
         [DisplayName("Line total")] public decimal LineTotal { get; set; }
     }
 }
