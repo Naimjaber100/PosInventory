@@ -164,7 +164,8 @@ namespace Inventory
                 ("Purchases by invoice", b => OpenReport(new Reports.PurchasesByInvoiceReport(), b)),
                 ("Purchases by item", b => OpenReport(new Reports.PurchasesByItemReport(), b)),
                 ("Purchases by supplier", b => OpenReport(new Reports.PurchasesBySupplierReport(), b)),
-                ("Stock value (cost / sale)", b => OpenReport(new Reports.StockValueReport(), b)));
+                ("Stock value (cost / sale)", b => OpenReport(new Reports.StockValueReport(), b)),
+                ("TVA", b => OpenReport(new Reports.VatReport(), b)));
             AddGroup(nav, "Settings", SettingsIcon,
                 ("Company", b => ShowPage(b, () =>
                 {

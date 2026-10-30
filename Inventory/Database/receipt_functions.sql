@@ -9,6 +9,7 @@ DROP FUNCTION IF EXISTS public.fn_sale_receipt(integer);
 -- { company: {name, address, mobile, email, vat_number},
 --   invoice_no, invoice_type (1 sale, 2 return), invoice_date, cashier, customer, customer_phone, customer_address,
 --   sub_total, line_discounts, discount, promo_name, total, change_lbp, usd_rate, primary_code,
+--   vat_amount, vat_included (NULL = no TVA), vat_lines: [{ rate, base (without TVA), vat }] one per rate,
 --   lines:    [{ item_name, quantity, unit_price, discount, promo_name, line_total }],
 --   payments: [{ method (1 cash, 2 card, 3 account), currency, amount, amount_lbp }] }
 -- promo_name: the promotion a line's discount / the invoice discount came from (Database/promotion_functions.sql).
@@ -36,6 +37,12 @@ AS $$
         'change_lbp', si.change_lbp,
         'usd_rate', si.exchange_rate,
         'primary_code', (SELECT code FROM currencies WHERE is_primary),
+        'vat_amount', si.vat_amount,
+        'vat_included', si.vat_included,
+        'vat_lines', coalesce((SELECT jsonb_agg(jsonb_build_object('rate', v.vat_rate, 'base', v.base, 'vat', v.vat) ORDER BY v.vat_rate)
+                               FROM (SELECT l.vat_rate, sum(l.line_total - l.vat_amount) AS base, sum(l.vat_amount) AS vat
+                                     FROM sales_lines l WHERE l.sale_id = si.sale_id AND si.vat_included IS NOT NULL
+                                     GROUP BY l.vat_rate) v), '[]'::jsonb),
         'lines', coalesce((SELECT jsonb_agg(jsonb_build_object(
                                 'item_name', l.description, 'quantity', l.quantity, 'unit_price', l.unit_price,
                                 'discount', l.discount, 'promo_name', l.promo_name, 'line_total', round(l.quantity * l.unit_price - l.discount, 2))

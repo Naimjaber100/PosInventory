@@ -23,6 +23,7 @@ namespace Inventory
             [DisplayName("Item"), ReadOnly(true)] public string ItemName { get; init; } = string.Empty;
             [DisplayName("Barcode"), ReadOnly(true)] public string? Barcode { get; init; }
             [DisplayName("In stock"), ReadOnly(true)] public decimal StockQty { get; init; }
+            [Browsable(false)] public decimal VatRate { get; init; }   // TVA % of the item (Vat.cs)
             [DisplayName("Qty")] public decimal Quantity { get => _quantity; set => Set(ref _quantity, value); }
             [DisplayName("Price")] public decimal UnitPrice { get => _unitPrice; set => Set(ref _unitPrice, value); }
             [DisplayName("Discount")] public decimal Discount { get => _discount; set => Set(ref _discount, value); }
@@ -41,13 +42,14 @@ namespace Inventory
         private readonly SaleRepository _saleRepository = new();
         private readonly BindingList<Line> _lines = new();
         private CurrencySet _currencies = CurrencySet.Default;
+        private VatSettings _vat = VatSettings.Off;   // TVA (Settings > Company)
         private List<CustomerModel> _customers = new();
         private bool _paymentTouched;   // the user typed a payment: it no longer follows the total
         private bool _settingPayment;
         private bool _dirty;
 
         private readonly ComboBox _customerCombo;
-        private readonly Label _customerInfo, _rateLabel, _subTotalValue, _totalValue, _totalSecondValue, _paymentInfo;
+        private readonly Label _customerInfo, _rateLabel, _subTotalValue, _totalValue, _totalSecondValue, _paymentInfo, _vatValue;
         private readonly TextBox _scanBox;
         private readonly DataGridView _grid;
         private readonly NumericUpDown _discountInput, _cashInput, _cashSecondInput, _cardInput;
@@ -175,6 +177,8 @@ namespace Inventory
             totalTable.Controls.Add(new Label { Text = "TOTAL", AutoSize = true, Font = new Font("Segoe UI Semibold", 12F, FontStyle.Bold), Margin = new Padding(3, 10, 3, 3) }, 0, 2);
             totalTable.Controls.Add(_totalValue, 1, 2);
             totalTable.Controls.Add(_totalSecondValue, 1, 3);
+            _vatValue = new Label { AutoSize = true, ForeColor = Color.FromArgb(90, 98, 108), Margin = new Padding(3, 4, 3, 3) };
+            totalTable.Controls.Add(_vatValue, 0, 3);
             totals.Controls.Add(totalTable);
 
             bottom.Controls.Add(payment, 0, 0);
@@ -215,6 +219,7 @@ namespace Inventory
         private async Task LoadAsync()
         {
             try { _currencies = await new CurrencyRepository().GetSetAsync(); } catch { /* LBP / USD defaults */ }
+            _vat = await VatSettings.LoadAsync();
             var primary = _currencies.Primary;
             var second = _currencies.Second is { HasRate: true } s ? s : null;
             _cashCaption.Text = $"Cash {primary.Code}";
@@ -337,6 +342,7 @@ namespace Inventory
                     ItemName = item.ItemName,
                     Barcode = item.Barcode,
                     StockQty = item.StockQty,
+                    VatRate = item.VatRate,
                     UnitPrice = item.SalePrice,
                 };
                 _lines.Add(line);
@@ -365,7 +371,13 @@ namespace Inventory
 
         private decimal SubTotal => _lines.Sum(l => l.LineTotal);
 
-        private decimal Total => SubTotal - _discountInput.Value;
+        // The TVA, as fn_save_sale works it out (Vat.cs)
+        private decimal SaleVat =>
+            Vat.OfSale(_lines.Select(l => (Math.Round(l.Quantity * l.UnitPrice - l.Discount, 2, MidpointRounding.AwayFromZero), l.VatRate)).ToList(),
+                _discountInput.Value, _vat);
+
+        // What the client pays: plus the TVA when the prices are without it
+        private decimal Total => SubTotal - _discountInput.Value + (_vat.AddsToTotal ? SaleVat : 0);
 
         private decimal SecondRate => _currencies.Second is { HasRate: true, IsPrimary: false, Rate: > 0 } s ? s.Rate!.Value : 0;
 
@@ -395,6 +407,9 @@ namespace Inventory
             }
 
             _subTotalValue.Text = _currencies.FormatPrimary(SubTotal);
+            var vat = SaleVat;
+            _vatValue.Text = vat == 0 ? string.Empty
+                : _vat.PricesInclude ? $"TVA incl. {_currencies.FormatPrimary(vat)}" : $"TVA + {_currencies.FormatPrimary(vat)}";
             _totalValue.Text = _currencies.FormatPrimary(total);
             _totalValue.ForeColor = total < 0 ? Color.Firebrick : Color.FromArgb(22, 32, 43);
             _totalSecondValue.Text = SecondRate > 0 && total > 0 ? "= " + _currencies.FormatSecond(total) : string.Empty;
@@ -485,6 +500,7 @@ namespace Inventory
                     ProductId = l.ProductId,
                     ItemName = l.ItemName,
                     IsWeighted = l.IsWeighted,
+                    VatRate = l.VatRate,
                     Quantity = l.Quantity,
                     UnitPrice = l.UnitPrice,
                     Discount = l.Discount,

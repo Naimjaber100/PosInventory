@@ -232,7 +232,7 @@ namespace Inventory
                 {
                     PackagingId = item.PackagingId, ProductId = item.ProductId, ItemName = item.ItemName,
                     PackagingName = item.PackagingName, Barcode = item.Barcode, SalePrice = item.SalePrice, Factor = item.Factor,
-                    IsWeighted = item.IsWeighted, BaseUnit = item.BaseUnit, StockQty = item.StockQty,
+                    IsWeighted = item.IsWeighted, BaseUnit = item.BaseUnit, StockQty = item.StockQty, VatRate = item.VatRate,
                     ProductName = item.ProductName.Length > 0 ? item.ProductName : item.ItemName,
                 };
                 Add(row);

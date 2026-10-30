@@ -42,6 +42,7 @@ namespace Inventory
         private int _quickGroupId = -1;                           // the open tab (-1 = none yet: open the first one)
         private int _quickColumns = QuickButtonStyle.DefaultColumns;
         private CurrencySet _currencies = CurrencySet.Default;   // primary currency, the second one and the rates
+        private VatSettings _vat = VatSettings.Off;               // TVA (Settings > Company), read with the currencies
         private readonly PromotionRepository _promotionRepository = new();
         private List<PromotionModel> _promotions = new();        // the promotions running today
         private DateTime _promotionsLoadedAt;
@@ -239,6 +240,7 @@ namespace Inventory
                 ShowStatus("Could not load the currencies: " + ex.Message, Color.Salmon);
                 return;
             }
+            _vat = await VatSettings.LoadAsync();
             UpdateInfo();
             UpdateTotals();
             if (_currencies.SecondRateMissing)
@@ -1015,6 +1017,7 @@ namespace Inventory
                     IsWeighted = item.IsWeighted,
                     BaseUnit = item.BaseUnit,
                     StockQty = item.StockQty,
+                    VatRate = item.VatRate,
                     Quantity = quantity,
                     UnitPrice = item.SalePrice,
                 };
@@ -1143,6 +1146,14 @@ namespace Inventory
 
         private decimal SubTotal => _lines.Sum(l => l.LineTotal);
 
+        // The TVA of the sale on the screen, as fn_save_sale works it out (Vat.cs). discount = the whole invoice discount.
+        private decimal SaleVat(decimal discount) =>
+            Vat.OfSale(_lines.Select(l => (Math.Round(l.Quantity * l.UnitPrice - l.TotalDiscount, 2, MidpointRounding.AwayFromZero), l.VatRate)).ToList(),
+                discount, _vat);
+
+        // What the customer pays: the sub total less the invoice discount, plus the TVA when the prices are without it
+        private decimal SaleTotal(decimal discount) => SubTotal - discount + (_vat.AddsToTotal ? SaleVat(discount) : 0);
+
         // Invoice discount from the box: an amount, or a percent of the sub total when % is pressed.
         // An invoice promotion (_promoDiscount) comes on top of it.
         private bool TryGetInvoiceDiscount(out decimal discount)
@@ -1162,9 +1173,15 @@ namespace Inventory
             var sub = SubTotal;
             var validDiscount = TryGetInvoiceDiscount(out var discount);
             discountBox.BackColor = validDiscount && discount + _promoDiscount <= sub ? SystemColors.Window : Color.MistyRose;
-            var total = sub - (validDiscount ? discount : 0) - _promoDiscount;
+            var invoiceDiscount = (validDiscount ? discount : 0) + _promoDiscount;
+            var vat = SaleVat(invoiceDiscount);
+            var total = sub - invoiceDiscount + (_vat.AddsToTotal ? vat : 0);
 
-            _promoLabel.Text = _promoDiscount > 0 ? $"Promo −{_promoDiscount:#,0}" : string.Empty;
+            // Under the captions: the invoice promotion and the TVA (in the total, or added to it)
+            var notes = new List<string>();
+            if (_promoDiscount > 0) notes.Add($"Promo −{_promoDiscount:#,0}");
+            if (vat != 0) notes.Add(_vat.PricesInclude ? $"TVA incl. {vat:#,0}" : $"TVA +{vat:#,0}");
+            _promoLabel.Text = string.Join("  ·  ", notes);
             _promoTip.SetToolTip(_promoLabel, _promoDiscount > 0 ? _promoName : null);
             subTotalCaption.Text = $"Sub total ({_lines.Count})";
             subTotalValue.Text = sub.ToString("#,0");
@@ -1199,7 +1216,7 @@ namespace Inventory
         private async Task PayAsync()
         {
             if (!ValidateSale(out var discount)) return;
-            var total = SubTotal - discount;
+            var total = SaleTotal(discount);
 
             using var payment = new PaymentForm(total, _currencies);
             if (payment.ShowDialog(this) != DialogResult.OK) { FocusScan(); return; }
@@ -1213,7 +1230,7 @@ namespace Inventory
             if (_returnMode) { ShowStatus("Quick cash is for sales. Use REFUND (F12) for a return.", Color.Khaki); return; }
             if (_saving) return;
             if (!ValidateSale(out var discount)) return;
-            var total = SubTotal - discount;
+            var total = SaleTotal(discount);
 
             var cash = new SalePaymentModel { Method = PaymentMethod.Cash, Currency = _currencies.Primary.Code, Amount = total };
             await SaveSaleAsync(new[] { cash }, discount);
@@ -1228,7 +1245,7 @@ namespace Inventory
             if (_saving || _askingUnpaid) return;
             if (_lines.Count == 0) { ShowStatus("Scan the items first.", Color.Khaki); return; }
             if (!ValidateSale(out var discount)) return;
-            var total = SubTotal - discount;
+            var total = SaleTotal(discount);
             if (total <= 0) { ShowStatus("There is nothing to leave unpaid.", Color.Khaki); return; }
 
             try
@@ -1371,6 +1388,7 @@ namespace Inventory
                         IsWeighted = l.IsWeighted,
                         BaseUnit = l.BaseUnit,
                         StockQty = l.StockQty,
+                        VatRate = l.VatRate,
                         Quantity = l.Quantity,
                         UnitPrice = l.UnitPrice,
                         Discount = l.Discount,
@@ -1485,7 +1503,7 @@ namespace Inventory
             if (_returnApprover is not { } approver) { SetReturnMode(false); return; }   // never without a manager
             if (_lines.Count == 0) { ShowStatus("Scan the items that come back first.", Color.Khaki); return; }
             if (!ValidateSale(out _)) return;
-            var total = SubTotal;
+            var total = SaleTotal(0);   // a return has no invoice discount
 
             if (CashierDialogs.ChooseRefund(this, total, _currencies) is not { } how) { FocusScan(); return; }
 

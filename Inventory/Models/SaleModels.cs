@@ -117,5 +117,6 @@ namespace Inventory.Models
         public bool IsWeighted { get; set; }
         public string BaseUnit { get; set; } = string.Empty;
         public decimal StockQty { get; set; }
+        public decimal VatRate { get; set; }
     }
 }

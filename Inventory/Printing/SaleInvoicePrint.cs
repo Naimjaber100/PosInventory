@@ -47,9 +47,17 @@ namespace Inventory.Printing
             var totals = new List<A4Total> { new($"{r.Lines.Count} line(s)   ·   Sub total", Money(r.SubTotal + r.LineDiscounts)) };
             if (discounts > 0)
                 totals.Add(new("Discount" + (r.Discount > 0 && !string.IsNullOrWhiteSpace(r.PromoName) ? $" (incl. {r.PromoName})" : string.Empty), "-" + Money(discounts)));
+            // TVA added to the prices: before the TOTAL; included in them: after it, with the total without TVA
+            if (r.VatIncluded == false)
+                foreach (var (caption, vat) in r.VatTotals()) totals.Add(new(caption, "+" + Money(vat)));
             totals.Add(new(r.IsReturn ? "TOTAL REFUNDED" : "TOTAL", primary.Format(r.Total), Big: true, LineAbove: true));
             if (r.UsdRate > 1 && !string.Equals(r.PrimaryCode, "USD", StringComparison.OrdinalIgnoreCase))
                 totals.Add(new($"In USD (1 $ = {Money(r.UsdRate)})", $"$ {r.Total / r.UsdRate:#,0.00}"));
+            if (r.VatIncluded == true && r.VatAmount != 0)
+            {
+                foreach (var (caption, vat) in r.VatTotals()) totals.Add(new(caption, Money(vat)));
+                totals.Add(new("Total without TVA", Money(r.Total - r.VatAmount)));
+            }
             var firstPayment = true;
             foreach (var p in r.Payments)
             {

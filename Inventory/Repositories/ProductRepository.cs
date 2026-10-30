@@ -146,6 +146,7 @@ namespace Inventory.Repositories
             parameters.Add("p_is_active", product.IsActive);
             parameters.Add("p_sale_price", product.SalePrice, DbType.Decimal);
             parameters.Add("p_barcode", product.Barcode, DbType.String);
+            parameters.Add("p_vat_rate", product.VatRate, DbType.Decimal);
             if (list != null) parameters.Add("p_packagings", new JsonbParameter(list));
             return parameters;
         }

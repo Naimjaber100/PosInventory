@@ -118,5 +118,16 @@ namespace Inventory.Repositories
 
             return (await GetListAsync<PurchasesBySupplierRow>(Procedures.ReportPurchasesBySupplier, parameters)).ToList();
         }
+
+        /// <summary>Report 11: the TVA charged, one row per day and rate in the period. userId null = every cashier.</summary>
+        public async Task<List<VatReportRow>> GetVatAsync(DateTime from, DateTime to, int? userId)
+        {
+            var parameters = new DynamicParameters();
+            parameters.Add("p_from", from.Date, DbType.Date);
+            parameters.Add("p_to", to.Date, DbType.Date);
+            parameters.Add("p_user_id", userId, DbType.Int32);
+
+            return (await GetListAsync<VatReportRow>(Procedures.ReportVat, parameters)).ToList();
+        }
     }
 }

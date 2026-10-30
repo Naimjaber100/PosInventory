@@ -16,6 +16,7 @@ namespace Inventory.Models
         [Browsable(false)] public bool IsWeighted { get; set; }
         [DisplayName("Unit")] public string BaseUnit { get; set; } = string.Empty;
         [DisplayName("In stock")] public decimal StockQty { get; set; }   // in base units
+        [Browsable(false)] public decimal VatRate { get; set; }          // TVA % of the item (Settings > Company says if it is charged)
 
         /// <summary>The product name the name search looks in (fn_pos_item_list; empty from the other functions).</summary>
         [Browsable(false)] public string ProductName { get; set; } = string.Empty;

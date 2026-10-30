@@ -13,6 +13,8 @@ namespace Inventory
         private readonly ProductRepository _productRepository = new();
         private readonly CategoryRepository _categoryRepository = new();
         private readonly BindingList<PackagingModel> _packagings = new();
+        private readonly NumericUpDown _vatRateInput;
+        private readonly Label _vatHintLabel;
         private readonly int? _productId;
         private readonly int? _defaultCategoryId;
         private string _lastUnit = string.Empty;
@@ -24,6 +26,21 @@ namespace Inventory
         public AddItemForm(int? productId, int? defaultCategoryId = null)
         {
             InitializeComponent();
+
+            // TVA % of the item: two more rows in the stock card (a new item starts with the company's rate)
+            _vatRateInput = new NumericUpDown
+            {
+                DecimalPlaces = 2, Maximum = 100, Dock = DockStyle.Top, Font = costInput.Font, Margin = costInput.Margin, TabIndex = 13,
+            };
+            _vatHintLabel = new Label { Dock = DockStyle.Fill, ForeColor = Color.DimGray, TextAlign = ContentAlignment.MiddleLeft };
+            stockCard.RowCount = 6;
+            stockCard.RowStyles.Add(new RowStyle(SizeType.Absolute, 32F));
+            stockCard.RowStyles.Add(new RowStyle(SizeType.Absolute, 44F));
+            stockCard.Controls.Add(new Label { Text = "TVA %", Dock = DockStyle.Fill, Font = costLabel.Font, TextAlign = ContentAlignment.BottomLeft }, 0, 4);
+            stockCard.Controls.Add(_vatRateInput, 0, 5);
+            stockCard.Controls.Add(_vatHintLabel, 1, 5);
+            stockCard.Height += 76;
+
             AppTheme.Apply(this);
             _productId = productId;
             _defaultCategoryId = defaultCategoryId;
@@ -75,6 +92,16 @@ namespace Inventory
                 if (!IsEdit && _defaultCategoryId.HasValue)
                     categoryCombo.SelectedValue = _defaultCategoryId.Value;
 
+                try
+                {
+                    var company = await new CompanyRepository().GetAsync();
+                    if (!IsEdit) _vatRateInput.Value = Math.Clamp(company.VatRate, _vatRateInput.Minimum, _vatRateInput.Maximum);
+                    _vatHintLabel.Text = !company.VatEnabled ? "TVA is off (Settings > Company)"
+                        : company.PricesIncludeVat ? "Sale prices include TVA"
+                        : "TVA is added to the sale prices";
+                }
+                catch { /* company_functions.sql not applied yet: no TVA settings */ }
+
                 if (IsEdit)
                 {
                     var product = await _productRepository.GetByIdAsync(_productId!.Value);
@@ -116,6 +143,7 @@ namespace Inventory
             reorderInput.Value = product.ReorderLevel;
             weightedCheck.Checked = product.IsWeighted;
             activeCheck.Checked = product.IsActive;
+            _vatRateInput.Value = Math.Clamp(product.VatRate ?? 0, _vatRateInput.Minimum, _vatRateInput.Maximum);
         }
 
         // Scale product: the code box is used only when it is ticked; a weighed item is usually "Sold by weight"
@@ -489,6 +517,7 @@ namespace Inventory
                 AvgCost = costInput.Value,
                 ReorderLevel = reorderInput.Value,
                 IsActive = activeCheck.Checked,
+                VatRate = _vatRateInput.Value,
             };
 
             try

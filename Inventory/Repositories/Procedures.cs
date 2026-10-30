@@ -22,6 +22,7 @@ namespace Inventory.Repositories
         public const string ReportPurchasesByItem = "fn_report_purchases_by_item";
         public const string ReportPurchasesBySupplier = "fn_report_purchases_by_supplier";
         public const string ReportStockValue = "fn_report_stock_value";
+        public const string ReportVat = "fn_report_vat";
 
         // Company, one record (Database/company_functions.sql)
         public const string GetCompany = "fn_company_get";

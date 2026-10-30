@@ -526,3 +526,35 @@ AS $$
     WHERE p.product_type = 1 AND p.stock_qty <> 0
     ORDER BY p.stock_qty * p.avg_cost DESC, p.name;
 $$;
+
+DROP FUNCTION IF EXISTS public.fn_report_vat(date, date, integer);
+
+-- ---------------------------------------------------------------------------
+-- 11. TVA: what was charged, one row per day and TVA rate from p_from to p_to (only the sales and returns made
+-- while TVA was on in Settings > Company: sales_invoices.vat_included is set; 0 % items are listed too).
+-- p_user_id NULL = every cashier.
+--   sale_count   = sales invoices with lines at this rate
+--   sales_base   = what those lines came to without TVA (after every discount)
+--   sales_vat    = their TVA
+--   returns_base / returns_vat = the same for return invoices (to subtract)
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.fn_report_vat(p_from date, p_to date, p_user_id integer DEFAULT NULL)
+RETURNS TABLE (day date, vat_rate numeric, sale_count bigint, sales_base numeric, sales_vat numeric,
+               returns_base numeric, returns_vat numeric)
+LANGUAGE sql STABLE
+AS $$
+    SELECT (si.invoice_date AT TIME ZONE current_setting('TimeZone'))::date AS day, l.vat_rate,
+           count(DISTINCT si.sale_id) FILTER (WHERE si.invoice_type = 1),
+           coalesce(sum(l.line_total - l.vat_amount) FILTER (WHERE si.invoice_type = 1), 0),
+           coalesce(sum(l.vat_amount) FILTER (WHERE si.invoice_type = 1), 0),
+           coalesce(sum(l.line_total - l.vat_amount) FILTER (WHERE si.invoice_type = 2), 0),
+           coalesce(sum(l.vat_amount) FILTER (WHERE si.invoice_type = 2), 0)
+    FROM sales_invoices si
+    JOIN sales_lines l ON l.sale_id = si.sale_id
+    WHERE si.status = 1 AND si.vat_included IS NOT NULL
+      AND si.invoice_date >= (p_from::timestamp AT TIME ZONE current_setting('TimeZone'))
+      AND si.invoice_date <  ((p_to + 1)::timestamp AT TIME ZONE current_setting('TimeZone'))
+      AND (p_user_id IS NULL OR si.user_id = p_user_id)
+    GROUP BY 1, 2
+    ORDER BY 1, 2;
+$$;

@@ -63,16 +63,22 @@ namespace Inventory.Printing
             y = Separator(g, y);
 
             // Totals
+            // TVA added to the prices: between the sub total and the TOTAL; included in them: under the TOTAL
             var discounts = _r.LineDiscounts + _r.Discount;
-            if (discounts > 0)
+            var vatAdded = _r.VatIncluded == false && _r.VatAmount != 0;
+            if (discounts > 0 || vatAdded)
             {
-                y = TwoColumns(g, "Sub total", Number(_r.SubTotal + _r.LineDiscounts), Normal, y);
-                y = TwoColumns(g, "Discount", "-" + Number(discounts), Normal, y);
+                y = TwoColumns(g, vatAdded ? "Sub total (without TVA)" : "Sub total", Number(_r.SubTotal + _r.LineDiscounts), Normal, y);
+                if (discounts > 0) y = TwoColumns(g, "Discount", "-" + Number(discounts), Normal, y);
                 if (_r.Discount > 0 && !string.IsNullOrWhiteSpace(_r.PromoName)) y = Text(g, $"   Promo: {_r.PromoName}", Small, y, Align.Left);
+                if (vatAdded)
+                    foreach (var (caption, vat) in _r.VatTotals()) y = TwoColumns(g, caption, "+" + Number(vat), Normal, y);
             }
             y = TwoColumns(g, _r.IsReturn ? "REFUND" : "TOTAL", Currencies.Primary.Format(_r.Total), Big, y + 2);
             if (_r.UsdRate > 1 && !string.Equals(_r.PrimaryCode, "USD", StringComparison.OrdinalIgnoreCase))
                 y = TwoColumns(g, $"In USD (1 $ = {Number(_r.UsdRate)})", $"$ {_r.Total / _r.UsdRate:#,0.00}", Small, y);
+            if (_r.VatIncluded == true)
+                foreach (var (caption, vat) in _r.VatTotals()) y = TwoColumns(g, caption, Number(vat), Small, y);
 
             // Payments and change
             if (_r.Payments.Count > 0)

@@ -20,6 +20,7 @@ namespace Inventory.Models
         [Browsable(false)] public bool IsWeighted { get; init; }
         [Browsable(false)] public string BaseUnit { get; init; } = string.Empty;
         [Browsable(false)] public decimal StockQty { get; init; }
+        [Browsable(false)] public decimal VatRate { get; init; }   // TVA % of the item (Vat.cs)
 
         [DisplayName("Qty"), ReadOnly(true)]
         public decimal Quantity

@@ -28,6 +28,29 @@ ALTER TABLE public.sales_lines    ADD COLUMN IF NOT EXISTS promo_name     text;
 ALTER TABLE public.sales_invoices ADD COLUMN IF NOT EXISTS promo_discount numeric(18,2) NOT NULL DEFAULT 0;
 ALTER TABLE public.sales_invoices ADD COLUMN IF NOT EXISTS promo_name     text;
 
+-- TVA (Settings > Company: company.vat_enabled, prices_include_vat; each item's rate: products.vat_rate).
+-- Worked out by fn_save_sale / fn_save_return on what each line costs after its share of the invoice discount.
+--   line:    vat_rate (%), vat_amount; line_total = what the customer pays for the line, TVA included;
+--            line_profit = line_total - vat_amount - cost (the TVA is not the shop's money).
+--   invoice: vat_amount = the lines' TVA; vat_included = the prices included it (true) or it was added on top
+--            (false; then total = sub_total - discount + vat_amount); NULL = no TVA charged.
+-- The item column is also added in product_functions.sql, which runs after this file.
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS vat_rate numeric(5,2) NOT NULL DEFAULT 11
+    CONSTRAINT products_vat_rate_check CHECK (vat_rate BETWEEN 0 AND 100);
+ALTER TABLE public.sales_lines    ADD COLUMN IF NOT EXISTS vat_rate     numeric(5,2)  NOT NULL DEFAULT 0;
+ALTER TABLE public.sales_lines    ADD COLUMN IF NOT EXISTS vat_amount   numeric(18,2) NOT NULL DEFAULT 0;
+ALTER TABLE public.sales_invoices ADD COLUMN IF NOT EXISTS vat_amount   numeric(18,2) NOT NULL DEFAULT 0;
+ALTER TABLE public.sales_invoices ADD COLUMN IF NOT EXISTS vat_included boolean;
+
+-- The TVA of an amount at p_rate %: the part of it that is TVA (p_included), or what is added on top of it.
+-- The cashier works it out the same way (Vat.cs), so the total it asks for is the one saved.
+CREATE OR REPLACE FUNCTION public.fn_vat_of(p_amount numeric, p_rate numeric, p_included boolean)
+RETURNS numeric
+LANGUAGE sql IMMUTABLE
+AS $$
+    SELECT round(p_amount * p_rate / CASE WHEN p_included THEN 100 + p_rate ELSE 100 END, 2);
+$$;
+
 -- ---------------------------------------------------------------------------
 -- Sales screen (cashier F7): finished sales and returns between two dates (inclusive), newest first.
 -- p_user_id NULL = every cashier. Numbers are positive; invoice_type 2 = return (subtract it in totals).
@@ -91,14 +114,17 @@ LANGUAGE plpgsql
 AS $$
 #variable_conflict use_column
 DECLARE
-    v_rate   numeric := fn_current_rate();
-    v_count  int;
-    v_refund numeric;
-    v_cost   numeric;
-    v_amount numeric;
-    v_msg    text;
-    v_id     int;
-    v_no     text;
+    v_rate     numeric := fn_current_rate();
+    v_count    int;
+    v_refund   numeric;
+    v_cost     numeric;
+    v_vat      numeric := 0;
+    v_vat_on   boolean;
+    v_vat_incl boolean;
+    v_amount   numeric;
+    v_msg      text;
+    v_id       int;
+    v_no       text;
 BEGIN
     IF v_rate IS NULL THEN RAISE EXCEPTION 'Set the exchange rate first.'; END IF;
     IF p_refund_method NOT IN (1, 2)
@@ -124,7 +150,9 @@ BEGIN
            coalesce((x.j->>'unit_price')::numeric, pk.sale_price)::numeric(18,2) AS unit_price,
            coalesce((x.j->>'discount')::numeric, 0)::numeric(18,2) AS discount,
            0::numeric(18,4) AS unit_cost,
-           0::numeric(18,2) AS refund
+           0::numeric(18,2) AS refund,
+           p.vat_rate::numeric(5,2) AS vat_rate,
+           0::numeric(18,2) AS vat
     FROM jsonb_array_elements(p_lines) WITH ORDINALITY AS x(j, ord)
     JOIN product_packaging pk ON pk.packaging_id = (x.j->>'packaging_id')::int
     JOIN products p ON p.product_id = pk.product_id AND p.product_type IN (1, 2);
@@ -161,6 +189,16 @@ BEGIN
     WHERE l.product_type = 2;
     UPDATE _rl SET refund = round(quantity * unit_price - discount, 2);
 
+    -- TVA as on a sale (the settings and rates of today): taken out of the refund, or added to it
+    SELECT c.vat_enabled, c.prices_include_vat INTO v_vat_on, v_vat_incl FROM company c WHERE c.company_id = 1;
+    v_vat_on := coalesce(v_vat_on, false);
+    v_vat_incl := coalesce(v_vat_incl, true);
+    IF v_vat_on THEN
+        UPDATE _rl SET vat = fn_vat_of(refund, vat_rate, v_vat_incl);
+        IF NOT v_vat_incl THEN UPDATE _rl SET refund = refund + vat; END IF;
+        SELECT sum(vat) INTO v_vat FROM _rl;
+    END IF;
+
     SELECT sum(refund), sum(round(quantity * unit_cost, 2)) INTO v_refund, v_cost FROM _rl;
     IF v_refund <= 0 THEN RAISE EXCEPTION 'There is nothing to refund.'; END IF;
     v_amount := round(v_refund / fn_currency_rate(p_refund_currency),
@@ -170,14 +208,16 @@ BEGIN
     v_no := fn_next_doc_no('R');
 
     INSERT INTO sales_invoices (invoice_no, invoice_type, shift_id, user_id, exchange_rate,
-                                sub_total, discount, total, total_cost, profit, status)
-    VALUES (v_no, 2, p_shift_id, p_user_id, v_rate, v_refund, 0, v_refund, v_cost, v_refund - v_cost, 1)
+                                sub_total, discount, total, total_cost, profit, status, vat_amount, vat_included)
+    VALUES (v_no, 2, p_shift_id, p_user_id, v_rate, v_refund - CASE WHEN v_vat_incl THEN 0 ELSE v_vat END, 0, v_refund,
+            v_cost, v_refund - v_vat - v_cost, 1, v_vat, CASE WHEN v_vat_on THEN v_vat_incl END)
     RETURNING sale_id INTO v_id;
 
     INSERT INTO sales_lines (sale_id, line_no, product_id, packaging_id, description, quantity, factor,
-                             unit_price, discount, unit_cost, line_total, line_profit)
+                             unit_price, discount, unit_cost, line_total, line_profit, vat_rate, vat_amount)
     SELECT v_id, line_no, product_id, packaging_id, description, quantity, factor,
-           unit_price, discount, unit_cost, refund, refund - round(quantity * unit_cost, 2)
+           unit_price, discount, unit_cost, refund, refund - vat - round(quantity * unit_cost, 2),
+           CASE WHEN v_vat_on THEN vat_rate ELSE 0 END, vat
     FROM _rl ORDER BY line_no;
 
     INSERT INTO sales_line_components (sale_line_id, product_id, base_qty_per_unit, unit_cost)
@@ -221,7 +261,7 @@ $$;
 CREATE OR REPLACE FUNCTION public.fn_pos_find_item(p_search text, p_limit integer DEFAULT 30)
 RETURNS TABLE (
     packaging_id integer, product_id integer, item_name text, packaging_name varchar, barcode varchar,
-    sale_price numeric, factor numeric, is_weighted boolean, base_unit varchar, stock_qty numeric)
+    sale_price numeric, factor numeric, is_weighted boolean, base_unit varchar, stock_qty numeric, vat_rate numeric)
 LANGUAGE plpgsql STABLE
 AS $$
 DECLARE
@@ -238,7 +278,8 @@ BEGIN
            CASE WHEN p.product_type = 2
                 THEN (SELECT min(floor(c.stock_qty / b.quantity)) FROM bundle_items b
                       JOIN products c ON c.product_id = b.component_product_id WHERE b.bundle_product_id = p.product_id)
-                ELSE p.stock_qty END
+                ELSE p.stock_qty END,
+           p.vat_rate
     FROM product_packaging pk
     JOIN products p ON p.product_id = pk.product_id
     WHERE pk.barcode = v_search
@@ -254,7 +295,8 @@ BEGIN
            CASE WHEN p.product_type = 2
                 THEN (SELECT min(floor(c.stock_qty / b.quantity)) FROM bundle_items b
                       JOIN products c ON c.product_id = b.component_product_id WHERE b.bundle_product_id = p.product_id)
-                ELSE p.stock_qty END
+                ELSE p.stock_qty END,
+           p.vat_rate
     FROM product_packaging pk
     JOIN products p ON p.product_id = pk.product_id
     WHERE pk.barcode = ANY (fn_barcode_variants(v_search))
@@ -271,7 +313,8 @@ BEGIN
            CASE WHEN p.product_type = 2
                 THEN (SELECT min(floor(c.stock_qty / b.quantity)) FROM bundle_items b
                       JOIN products c ON c.product_id = b.component_product_id WHERE b.bundle_product_id = p.product_id)
-                ELSE p.stock_qty END
+                ELSE p.stock_qty END,
+           p.vat_rate
     FROM product_packaging pk
     JOIN products p ON p.product_id = pk.product_id
     WHERE pk.is_active AND pk.can_sell AND p.is_active AND p.product_type IN (1, 2)
@@ -323,10 +366,11 @@ CREATE VIEW public.v_pos_items AS
                      AND row_number() OVER (PARTITION BY r.product_id, r.sellable
                                             ORDER BY (r.factor = 1) DESC, r.is_default DESC, r.packaging_id) = 1
                 THEN r.scale_code END AS scale_code,
-           r.sellable
+           r.sellable,
+           r.vat_rate
     FROM (SELECT pk.packaging_id, p.product_id, p.name, p.size, p.color, pk.name AS pack_name, pk.barcode,
                  pk.sale_price, pk.factor, pk.is_default, p.is_weighted, p.base_unit, p.product_type, p.scale_code,
-                 p.stock_qty,
+                 p.stock_qty, p.vat_rate,
                  (pk.is_active AND pk.can_sell AND p.is_active AND p.product_type IN (1, 2)) AS sellable
           FROM product_packaging pk
           JOIN products p ON p.product_id = pk.product_id) r;
@@ -375,9 +419,9 @@ DROP TRIGGER IF EXISTS trg_bundle_items_pos_notify ON public.bundle_items;
 
 DROP TRIGGER IF EXISTS trg_products_pos_stamp ON public.products;
 CREATE TRIGGER trg_products_pos_stamp
-    BEFORE INSERT OR UPDATE OF name, size, color, base_unit, is_weighted, is_active, product_type, scale_code
+    BEFORE INSERT OR UPDATE OF name, size, color, base_unit, is_weighted, is_active, product_type, scale_code, vat_rate
     ON public.products
-    FOR EACH ROW EXECUTE FUNCTION fn_pos_item_stamp('name', 'size', 'color', 'base_unit', 'is_weighted', 'is_active', 'product_type', 'scale_code');
+    FOR EACH ROW EXECUTE FUNCTION fn_pos_item_stamp('name', 'size', 'color', 'base_unit', 'is_weighted', 'is_active', 'product_type', 'scale_code', 'vat_rate');
 DROP TRIGGER IF EXISTS trg_packaging_pos_stamp ON public.product_packaging;
 CREATE TRIGGER trg_packaging_pos_stamp
     BEFORE INSERT OR UPDATE OF product_id, name, factor, barcode, sale_price, is_default, can_sell, is_active
@@ -392,7 +436,7 @@ CREATE OR REPLACE FUNCTION public.fn_pos_item_list(p_since timestamptz DEFAULT N
 RETURNS TABLE (
     packaging_id integer, product_id integer, item_name text, packaging_name varchar, barcode varchar,
     sale_price numeric, factor numeric, is_weighted boolean, base_unit varchar, stock_qty numeric,
-    product_name varchar, scale_code varchar, sellable boolean, as_of timestamptz)
+    product_name varchar, scale_code varchar, sellable boolean, vat_rate numeric, as_of timestamptz)
 LANGUAGE plpgsql STABLE
 AS $$
 DECLARE
@@ -434,11 +478,11 @@ CREATE OR REPLACE FUNCTION public.fn_pos_get_held_lines(p_sale_id integer)
 RETURNS TABLE (
     packaging_id integer, product_id integer, item_name text, packaging_name varchar, barcode varchar,
     quantity numeric, unit_price numeric, discount numeric, factor numeric, is_weighted boolean,
-    base_unit varchar, stock_qty numeric)
+    base_unit varchar, stock_qty numeric, vat_rate numeric)
 LANGUAGE sql STABLE
 AS $$
     SELECT l.packaging_id, l.product_id, l.description::text, pk.name, pk.barcode,
-           l.quantity, l.unit_price, l.discount, pk.factor, p.is_weighted, p.base_unit, p.stock_qty
+           l.quantity, l.unit_price, l.discount, pk.factor, p.is_weighted, p.base_unit, p.stock_qty, p.vat_rate
     FROM sales_lines l
     JOIN sales_invoices si    ON si.sale_id = l.sale_id AND si.status = 0
     JOIN product_packaging pk ON pk.packaging_id = l.packaging_id
@@ -484,6 +528,9 @@ DECLARE
     v_cash       numeric;
     v_on_account numeric;
     v_change     numeric;
+    v_vat        numeric := 0;
+    v_vat_on     boolean;
+    v_vat_incl   boolean;
     v_msg        text;
     v_sale_id    int;
     v_no         text;
@@ -514,7 +561,9 @@ BEGIN
            nullif(trim(x.j->>'promo_name'), '')                   AS promo_name,
            0::numeric(18,4)                                       AS unit_cost,
            0::numeric(18,2)                                       AS gross,         -- qty x price - line discount
-           0::numeric(18,2)                                       AS disc_share     -- share of the invoice discount
+           0::numeric(18,2)                                       AS disc_share,    -- share of the invoice discount
+           p.vat_rate::numeric(5,2)                               AS vat_rate,
+           0::numeric(18,2)                                       AS vat
     FROM jsonb_array_elements(p_lines) WITH ORDINALITY AS x(j, ord)
     JOIN product_packaging pk ON pk.packaging_id = (x.j->>'packaging_id')::int AND pk.is_active AND pk.can_sell
     JOIN products p ON p.product_id = pk.product_id AND p.is_active AND p.product_type IN (1, 2);
@@ -579,6 +628,16 @@ BEGIN
         WHERE line_no = (SELECT line_no FROM _l ORDER BY gross DESC, line_no LIMIT 1);
     END IF;
 
+    -- TVA of each line, on what it costs after the invoice discount: the part of it that is TVA, or added on top
+    SELECT c.vat_enabled, c.prices_include_vat INTO v_vat_on, v_vat_incl FROM company c WHERE c.company_id = 1;
+    v_vat_on := coalesce(v_vat_on, false);
+    v_vat_incl := coalesce(v_vat_incl, true);
+    IF v_vat_on THEN
+        UPDATE _l SET vat = fn_vat_of(gross - disc_share, vat_rate, v_vat_incl);
+        SELECT sum(vat) INTO v_vat FROM _l;
+        IF NOT v_vat_incl THEN v_total := v_total + v_vat; END IF;
+    END IF;
+
     -- 6. Payments
     IF jsonb_typeof(p_payments) <> 'array' OR EXISTS (
         SELECT 1 FROM jsonb_array_elements(p_payments) AS y(v)
@@ -626,21 +685,24 @@ BEGIN
 
     INSERT INTO sales_invoices (invoice_no, invoice_type, customer_id, shift_id, user_id, exchange_rate,
                                 sub_total, discount, total, total_cost, profit, change_lbp, status, due_lbp,
-                                promo_discount, promo_name)
+                                promo_discount, promo_name, vat_amount, vat_included)
     VALUES (v_no, 1, p_customer_id, p_shift_id, p_user_id, v_rate,
-            v_sub, v_disc, v_total, v_cost, v_total - v_cost, v_change, 1,
+            v_sub, v_disc, v_total, v_cost, v_total - v_vat - v_cost, v_change, 1,
             v_on_account,   -- unpaid until the client pays (Database/customer_payment_functions.sql)
-            v_promo, CASE WHEN v_promo > 0 THEN nullif(trim(p_promo_name), '') END)
+            v_promo, CASE WHEN v_promo > 0 THEN nullif(trim(p_promo_name), '') END,
+            v_vat, CASE WHEN v_vat_on THEN v_vat_incl END)
     RETURNING sale_id INTO v_sale_id;
 
+    -- line_total: what the customer pays for the line, TVA included (added on top when the prices are without it)
     INSERT INTO sales_lines (sale_id, line_no, product_id, packaging_id, description, quantity, factor,
                              unit_price, discount, discount_share, unit_cost, line_total, line_profit,
-                             promo_discount, promo_name)
+                             promo_discount, promo_name, vat_rate, vat_amount)
     SELECT v_sale_id, line_no, product_id, packaging_id, description, quantity, factor,
            unit_price, discount, disc_share, unit_cost,
-           gross - disc_share,
-           gross - disc_share - round(quantity * unit_cost, 2),
-           promo_discount, CASE WHEN promo_discount > 0 THEN promo_name END
+           gross - disc_share + CASE WHEN v_vat_incl THEN 0 ELSE vat END,
+           gross - disc_share - CASE WHEN v_vat_incl THEN vat ELSE 0 END - round(quantity * unit_cost, 2),
+           promo_discount, CASE WHEN promo_discount > 0 THEN promo_name END,
+           CASE WHEN v_vat_on THEN vat_rate ELSE 0 END, vat
     FROM _l ORDER BY line_no;
 
     -- Remember what was inside each bundle, so a return puts back exactly that

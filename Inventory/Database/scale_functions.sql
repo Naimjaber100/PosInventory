@@ -48,12 +48,12 @@ END $$;
 CREATE OR REPLACE FUNCTION public.fn_pos_find_scale_item(p_scale_code text)
 RETURNS TABLE (
     packaging_id integer, product_id integer, item_name text, packaging_name varchar, barcode varchar,
-    sale_price numeric, factor numeric, is_weighted boolean, base_unit varchar, stock_qty numeric)
+    sale_price numeric, factor numeric, is_weighted boolean, base_unit varchar, stock_qty numeric, vat_rate numeric)
 LANGUAGE sql STABLE
 AS $$
     SELECT pk.packaging_id, p.product_id,
            fn_item_description(p.name::text, p.size::text, p.color::text, pk.name::text),
-           pk.name, pk.barcode, pk.sale_price, pk.factor, p.is_weighted, p.base_unit, p.stock_qty
+           pk.name, pk.barcode, pk.sale_price, pk.factor, p.is_weighted, p.base_unit, p.stock_qty, p.vat_rate
     FROM products p
     JOIN product_packaging pk ON pk.product_id = p.product_id AND pk.is_active AND pk.can_sell
     WHERE p.scale_code = trim(p_scale_code) AND p.is_active AND p.product_type = 1

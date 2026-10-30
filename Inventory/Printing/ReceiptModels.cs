@@ -23,10 +23,18 @@ namespace Inventory.Printing
         public decimal ChangeLbp { get; set; }
         public decimal UsdRate { get; set; }
         public string PrimaryCode { get; set; } = "LBP";
+        public decimal VatAmount { get; set; }
+        public bool? VatIncluded { get; set; }         // in the prices (true), added to the total (false), no TVA (null)
+        public List<ReceiptVat> VatLines { get; set; } = new();
         public List<ReceiptLine> Lines { get; set; } = new();
         public List<ReceiptPayment> Payments { get; set; } = new();
 
         public bool IsReturn => InvoiceType == 2;
+
+        /// <summary>The TVA lines for the totals: "TVA 11%" and its amount, one per rate.</summary>
+        public IEnumerable<(string Caption, decimal Vat)> VatTotals() =>
+            VatIncluded is null ? Enumerable.Empty<(string, decimal)>()
+                : VatLines.Where(v => v.Vat != 0).Select(v => ($"TVA {v.Rate:0.##}%" + (VatIncluded == true ? " included" : string.Empty), v.Vat));
 
         private static readonly JsonSerializerOptions Options = new()
         {
@@ -73,6 +81,14 @@ namespace Inventory.Printing
         public decimal Discount { get; set; }
         public string? PromoName { get; set; }   // the promotion the discount comes from, if any
         public decimal LineTotal { get; set; }
+    }
+
+    // The TVA of one rate on the receipt: base = what the lines cost without TVA
+    public sealed class ReceiptVat
+    {
+        public decimal Rate { get; set; }
+        public decimal Base { get; set; }
+        public decimal Vat { get; set; }
     }
 
     public sealed class ReceiptPayment

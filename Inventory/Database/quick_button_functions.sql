@@ -57,7 +57,8 @@ CREATE OR REPLACE FUNCTION public.fn_quick_button_get_all(p_for_cashier boolean 
 RETURNS TABLE (
     button_id integer, group_id integer, caption varchar, color varchar, sort_order integer, is_active boolean,
     ask_price boolean, packaging_id integer, product_id integer, item_name text, packaging_name varchar,
-    barcode varchar, sale_price numeric, factor numeric, is_weighted boolean, base_unit varchar, stock_qty numeric)
+    barcode varchar, sale_price numeric, factor numeric, is_weighted boolean, base_unit varchar, stock_qty numeric,
+    vat_rate numeric)
 LANGUAGE sql STABLE
 AS $$
     SELECT qb.button_id, qb.group_id, qb.caption, qb.color, qb.sort_order, qb.is_active, qb.ask_price,
@@ -67,7 +68,8 @@ AS $$
            CASE WHEN p.product_type = 2
                 THEN (SELECT min(floor(c.stock_qty / b.quantity)) FROM bundle_items b
                       JOIN products c ON c.product_id = b.component_product_id WHERE b.bundle_product_id = p.product_id)
-                ELSE p.stock_qty END
+                ELSE p.stock_qty END,
+           p.vat_rate
     FROM pos_quick_buttons qb
     JOIN product_packaging pk  ON pk.packaging_id = qb.packaging_id
     JOIN products p            ON p.product_id = pk.product_id

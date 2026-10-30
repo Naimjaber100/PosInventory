@@ -38,6 +38,9 @@ namespace Inventory.Repositories
             parameters.Add("p_email", company.Email, DbType.String);
             parameters.Add("p_mobile", company.Mobile, DbType.String);
             parameters.Add("p_vat_number", company.VatNumber, DbType.String);
+            parameters.Add("p_vat_enabled", company.VatEnabled);
+            parameters.Add("p_prices_include_vat", company.PricesIncludeVat);
+            parameters.Add("p_vat_rate", company.VatRate);
 
             await ExecuteAsync(Procedures.SaveCompany, parameters);
         }

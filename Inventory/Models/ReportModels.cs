@@ -433,3 +433,38 @@ namespace Inventory.Models
         }
     }
 }
+
+namespace Inventory.Models
+{
+    // Report 11 - TVA: one row of fn_report_vat (one day and rate; amounts in the primary currency).
+    // The report adds a total row per rate and a grand TOTAL at the end (IsTotal; Day is null on them).
+    public class VatReportRow
+    {
+        [Browsable(false)] public DateTime? Day { get; set; }
+        [Browsable(false)] public bool IsTotal { get; set; }
+        [Browsable(false)] public string? TotalCaption { get; set; }
+
+        [DisplayName("Day")] public string DayText => IsTotal ? TotalCaption ?? "TOTAL" : Day?.ToString("ddd dd/MM/yyyy") ?? string.Empty;
+        [DisplayName("TVA %")] public decimal? VatRate { get; set; }
+        [DisplayName("Sales #")] public long? SaleCount { get; set; }   // empty on the TOTAL of several rates (an invoice can have both)
+        [DisplayName("Sales without TVA")] public decimal SalesBase { get; set; }
+        [DisplayName("TVA on sales")] public decimal SalesVat { get; set; }
+        [DisplayName("Returns without TVA")] public decimal ReturnsBase { get; set; }
+        [DisplayName("TVA on returns")] public decimal ReturnsVat { get; set; }
+        [DisplayName("Net without TVA")] public decimal NetBase => SalesBase - ReturnsBase;
+        [DisplayName("Net TVA")] public decimal NetVat => SalesVat - ReturnsVat;
+
+        /// <summary>A total row of some rows: caption "TOTAL 11%" (rate set) or "TOTAL" (all rates).</summary>
+        public static VatReportRow TotalOf(IReadOnlyCollection<VatReportRow> rows, decimal? rate) => new()
+        {
+            IsTotal = true,
+            TotalCaption = rate is { } r ? $"TOTAL {r:0.##}%" : "TOTAL",
+            VatRate = rate,
+            SaleCount = rate != null || rows.Select(r => r.VatRate).Distinct().Count() <= 1 ? rows.Sum(r => r.SaleCount ?? 0) : null,
+            SalesBase = rows.Sum(r => r.SalesBase),
+            SalesVat = rows.Sum(r => r.SalesVat),
+            ReturnsBase = rows.Sum(r => r.ReturnsBase),
+            ReturnsVat = rows.Sum(r => r.ReturnsVat),
+        };
+    }
+}

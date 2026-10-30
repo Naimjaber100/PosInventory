@@ -20,6 +20,7 @@ namespace Inventory.Models
         public decimal? SalePrice { get; set; }
         public string? Barcode { get; set; }
         public bool IsActive { get; set; } = true;
+        public decimal? VatRate { get; set; }   // TVA %; null when adding = the company's rate
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
     }

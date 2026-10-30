@@ -3,14 +3,18 @@ using Inventory.Repositories;
 
 namespace Inventory
 {
-    // Settings > Company: the one company record (name, address, email, mobile number, VAT number, logo).
+    // Settings > Company: the one company record (name, address, email, mobile number, VAT number, logo, TVA).
     // The name is shown on the login screen, the cashier screen and the back office.
     // The logo prints at the top of the sale receipt (made small and grey for the receipt printer when chosen).
+    // TVA: charged or not, whether the items' sale prices already include it, and the rate a new item starts with.
     public partial class CompanyForm : Form
     {
         private readonly CompanyRepository _companyRepository = new();
         private readonly PictureBox _logoPicture;
         private readonly Button _removeLogoButton;
+        private readonly CheckBox _vatEnabledCheck;
+        private readonly CheckBox _pricesIncludeVatCheck;
+        private readonly NumericUpDown _vatRateInput;
         private byte[]? _logo;          // what is shown (PNG, CompanyLogo.Prepare)
         private bool _logoChanged;
 
@@ -42,6 +46,28 @@ namespace Inventory
             fieldsTable.Controls.Add(logoRow, 1, 5);
             ClientSize = new Size(ClientSize.Width, ClientSize.Height + 112);
             SetLogo(null, changed: false);
+
+            // TVA: a last row under the logo. Off = the rate and "included" are kept but not used.
+            _vatEnabledCheck = new CheckBox { Text = "Charge TVA", AutoSize = true, Margin = new Padding(0, 6, 24, 0) };
+            _vatRateInput = new NumericUpDown { DecimalPlaces = 2, Maximum = 100, Value = 11, Width = 80, Margin = new Padding(0, 3, 4, 0) };
+            _pricesIncludeVatCheck = new CheckBox { Text = "Sale prices include TVA", AutoSize = true, Checked = true, Margin = new Padding(0, 4, 0, 0) };
+            _vatEnabledCheck.CheckedChanged += (_, _) => _vatRateInput.Enabled = _pricesIncludeVatCheck.Enabled = _vatEnabledCheck.Checked;
+            var vatRow = new FlowLayoutPanel { Dock = DockStyle.Fill, Margin = Padding.Empty };
+            vatRow.Controls.AddRange(new Control[]
+            {
+                _vatEnabledCheck,
+                new Label { Text = "Rate", AutoSize = true, Margin = new Padding(0, 8, 6, 0) },
+                _vatRateInput,
+                new Label { Text = "%  (new items)", AutoSize = true, ForeColor = Color.DimGray, Margin = new Padding(0, 8, 0, 0) },
+            });
+            vatRow.SetFlowBreak(vatRow.Controls[^1], true);
+            vatRow.Controls.Add(_pricesIncludeVatCheck);
+            fieldsTable.RowCount = 7;
+            fieldsTable.RowStyles.Add(new RowStyle(SizeType.Absolute, 76F));
+            fieldsTable.Controls.Add(new Label { Text = "TVA", Dock = DockStyle.Fill, Padding = new Padding(0, 8, 0, 0) }, 0, 6);
+            fieldsTable.Controls.Add(vatRow, 1, 6);
+            ClientSize = new Size(ClientSize.Width, ClientSize.Height + 76);
+            _vatRateInput.Enabled = _pricesIncludeVatCheck.Enabled = false;
 
             AppTheme.Apply(this);
             FormClosed += (_, _) => _logoPicture.Image?.Dispose();
@@ -87,6 +113,9 @@ namespace Inventory
                 emailText.Text = company.Email;
                 mobileText.Text = company.Mobile;
                 vatText.Text = company.VatNumber;
+                _vatRateInput.Value = Math.Clamp(company.VatRate, _vatRateInput.Minimum, _vatRateInput.Maximum);
+                _pricesIncludeVatCheck.Checked = company.PricesIncludeVat;
+                _vatEnabledCheck.Checked = company.VatEnabled;
                 try { SetLogo(await _companyRepository.GetLogoAsync(), changed: false); }
                 catch { /* company_functions.sql not applied yet: no logo */ }
                 saveButton.Enabled = true;
@@ -107,6 +136,9 @@ namespace Inventory
                 Email = emailText.Text.Trim(),
                 Mobile = mobileText.Text.Trim(),
                 VatNumber = vatText.Text.Trim(),
+                VatEnabled = _vatEnabledCheck.Checked,
+                PricesIncludeVat = _pricesIncludeVatCheck.Checked,
+                VatRate = _vatRateInput.Value,
             };
 
             if (company.Name.Length == 0)

@@ -183,6 +183,13 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------
+-- TVA rate of each item, in % (charged only when TVA is on in Settings > Company, company.vat_enabled).
+-- A new item starts with the company's rate (company.vat_rate); existing items get 11 %.
+-- ---------------------------------------------------------------------------
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS vat_rate numeric(5,2) NOT NULL DEFAULT 11
+    CONSTRAINT products_vat_rate_check CHECK (vat_rate BETWEEN 0 AND 100);
+
+-- ---------------------------------------------------------------------------
 -- Products: read (sale_price / barcode come from the default packaging)
 -- Dropped first so the returned columns can change on re-run.
 -- ---------------------------------------------------------------------------
@@ -211,7 +218,7 @@ RETURNS TABLE (
     product_id integer, parent_id integer, name varchar, category_id integer, category_name varchar,
     product_type smallint, size varchar, color varchar, base_unit varchar, is_weighted boolean,
     avg_cost numeric, stock_qty numeric, reorder_level numeric, sale_price numeric, barcode varchar,
-    is_active boolean, created_at timestamptz, updated_at timestamptz,
+    is_active boolean, created_at timestamptz, updated_at timestamptz, vat_rate numeric,
     total_count bigint)
 LANGUAGE plpgsql STABLE
 AS $$
@@ -234,7 +241,7 @@ BEGIN
     SELECT p.product_id, p.parent_id, p.name, p.category_id, c.name,
            p.product_type, p.size, p.color, p.base_unit, p.is_weighted,
            p.avg_cost, p.stock_qty, p.reorder_level, pk.sale_price, pk.barcode,
-           p.is_active, p.created_at, p.updated_at,
+           p.is_active, p.created_at, p.updated_at, p.vat_rate,
            count(*) OVER ()
     FROM products p
     LEFT JOIN categories c         ON c.category_id = p.category_id
@@ -268,13 +275,13 @@ RETURNS TABLE (
     product_id integer, parent_id integer, name varchar, category_id integer, category_name varchar,
     product_type smallint, size varchar, color varchar, base_unit varchar, is_weighted boolean,
     avg_cost numeric, stock_qty numeric, reorder_level numeric, sale_price numeric, barcode varchar,
-    is_active boolean, created_at timestamptz, updated_at timestamptz)
+    is_active boolean, created_at timestamptz, updated_at timestamptz, vat_rate numeric)
 LANGUAGE sql STABLE
 AS $$
     SELECT p.product_id, p.parent_id, p.name, p.category_id, c.name,
            p.product_type, p.size, p.color, p.base_unit, p.is_weighted,
            p.avg_cost, p.stock_qty, p.reorder_level, pk.sale_price, pk.barcode,
-           p.is_active, p.created_at, p.updated_at
+           p.is_active, p.created_at, p.updated_at, p.vat_rate
     FROM products p
     LEFT JOIN categories c         ON c.category_id = p.category_id
     LEFT JOIN product_packaging pk ON pk.product_id = p.product_id AND pk.is_default
@@ -405,9 +412,11 @@ END $$;
 -- stock through fn_add_opening_stock.
 -- p_packagings (JSON, see fn_product_save_packagings): when NULL, one default
 -- packaging is created from the base unit, p_sale_price and p_barcode (used by import).
+-- p_vat_rate: TVA %, NULL = the company's rate (Settings > Company).
 -- ---------------------------------------------------------------------------
 DROP FUNCTION IF EXISTS public.fn_product_add(text, integer, smallint, text, text, text, boolean, numeric, numeric, boolean, numeric, text, numeric, integer);
 DROP FUNCTION IF EXISTS public.fn_product_add(text, integer, smallint, text, text, text, boolean, numeric, numeric, boolean, numeric, text, numeric, integer, jsonb);
+DROP FUNCTION IF EXISTS public.fn_product_add(text, integer, smallint, text, text, text, boolean, numeric, numeric, boolean, numeric, text, numeric, integer, jsonb, numeric);
 
 CREATE OR REPLACE FUNCTION public.fn_product_add(
     p_name          text,
@@ -424,25 +433,28 @@ CREATE OR REPLACE FUNCTION public.fn_product_add(
     p_barcode       text,
     p_opening_qty   numeric,
     p_user_id       integer,
-    p_packagings    jsonb DEFAULT NULL)
+    p_packagings    jsonb DEFAULT NULL,
+    p_vat_rate      numeric DEFAULT NULL)
 RETURNS integer
 LANGUAGE plpgsql
 AS $$
 DECLARE
-    v_id integer;
+    v_id       integer;
+    v_vat_rate numeric := coalesce(p_vat_rate, (SELECT c.vat_rate FROM company c WHERE c.company_id = 1), 0);
 BEGIN
     IF coalesce(trim(p_name), '') = '' THEN RAISE EXCEPTION 'Name is required.'; END IF;
     IF coalesce(trim(p_base_unit), '') = '' THEN RAISE EXCEPTION 'Base unit is required.'; END IF;
     IF p_avg_cost < 0 THEN RAISE EXCEPTION 'Cost cannot be negative.'; END IF;
     IF p_sale_price < 0 THEN RAISE EXCEPTION 'Sale price cannot be negative.'; END IF;
+    IF v_vat_rate NOT BETWEEN 0 AND 100 THEN RAISE EXCEPTION 'The TVA rate must be between 0 and 100.'; END IF;
     IF coalesce(p_opening_qty, 0) > 0 AND p_product_type <> 1 THEN
         RAISE EXCEPTION 'Only standard items can have opening stock.';
     END IF;
 
     INSERT INTO products (name, category_id, product_type, size, color, base_unit,
-                          is_weighted, avg_cost, reorder_level, is_active)
+                          is_weighted, avg_cost, reorder_level, is_active, vat_rate)
     VALUES (trim(p_name), p_category_id, p_product_type, nullif(trim(p_size), ''), nullif(trim(p_color), ''),
-            trim(p_base_unit), p_is_weighted, coalesce(p_avg_cost, 0), coalesce(p_reorder_level, 0), p_is_active)
+            trim(p_base_unit), p_is_weighted, coalesce(p_avg_cost, 0), coalesce(p_reorder_level, 0), p_is_active, v_vat_rate)
     RETURNING product_id INTO v_id;
 
     IF p_packagings IS NULL THEN
@@ -465,9 +477,11 @@ END $$;
 -- stock functions (opening stock, purchases, adjustments, sales).
 -- p_packagings (JSON, see fn_product_save_packagings): when NULL, only the default
 -- packaging's p_sale_price and p_barcode are updated.
+-- p_vat_rate: TVA %, NULL = unchanged.
 -- ---------------------------------------------------------------------------
 DROP FUNCTION IF EXISTS public.fn_product_update(integer, text, integer, smallint, text, text, text, boolean, numeric, boolean, numeric, text);
 DROP FUNCTION IF EXISTS public.fn_product_update(integer, text, integer, smallint, text, text, text, boolean, numeric, boolean, numeric, text, jsonb);
+DROP FUNCTION IF EXISTS public.fn_product_update(integer, text, integer, smallint, text, text, text, boolean, numeric, boolean, numeric, text, jsonb, numeric);
 
 CREATE OR REPLACE FUNCTION public.fn_product_update(
     p_product_id    integer,
@@ -482,7 +496,8 @@ CREATE OR REPLACE FUNCTION public.fn_product_update(
     p_is_active     boolean,
     p_sale_price    numeric,
     p_barcode       text,
-    p_packagings    jsonb DEFAULT NULL)
+    p_packagings    jsonb DEFAULT NULL,
+    p_vat_rate      numeric DEFAULT NULL)
 RETURNS void
 LANGUAGE plpgsql
 AS $$
@@ -490,6 +505,7 @@ BEGIN
     IF coalesce(trim(p_name), '') = '' THEN RAISE EXCEPTION 'Name is required.'; END IF;
     IF coalesce(trim(p_base_unit), '') = '' THEN RAISE EXCEPTION 'Base unit is required.'; END IF;
     IF p_sale_price < 0 THEN RAISE EXCEPTION 'Sale price cannot be negative.'; END IF;
+    IF p_vat_rate NOT BETWEEN 0 AND 100 THEN RAISE EXCEPTION 'The TVA rate must be between 0 and 100.'; END IF;
 
     UPDATE products
     SET name          = trim(p_name),
@@ -501,6 +517,7 @@ BEGIN
         is_weighted   = p_is_weighted,
         reorder_level = coalesce(p_reorder_level, 0),
         is_active     = p_is_active,
+        vat_rate      = coalesce(p_vat_rate, vat_rate),
         updated_at    = now()
     WHERE product_id = p_product_id;
 
