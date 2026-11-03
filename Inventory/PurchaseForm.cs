@@ -150,7 +150,7 @@ namespace Inventory
                 await OpenPurchaseAsync(invoice.PurchaseId);
         }
 
-        // New (null) or existing purchase; drafts can be edited, posted ones open read-only
+        // New (null) or existing purchase; drafts can be edited, posted ones open read-only until Edit is clicked
         private async Task OpenPurchaseAsync(int? purchaseId)
         {
             using var form = new PurchaseEditForm(purchaseId);

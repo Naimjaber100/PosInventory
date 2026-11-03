@@ -49,6 +49,8 @@ namespace Inventory
 
             ApplicationConfiguration.Initialize();
 
+            if (!CheckLicense()) return;
+
             // Login, then the user's main window: back office for a Manager, cashier for a User.
             // Closing it (or Log out) comes back to the login screen; the app exits from there.
             while (true)
@@ -62,6 +64,27 @@ namespace Inventory
                 foreach (var left in Application.OpenForms.Cast<Form>().ToList()) left.Dispose();   // nothing stays open behind the login
                 AppSession.SignOut();
             }
+        }
+
+        // Each PC needs its own license (Licensing/LicenseManager): none, another PC's, or expired = the activation
+        // window, and the program closes unless a valid one is entered. The last 15 days, a reminder offers to renew.
+        private static bool CheckLicense()
+        {
+            var license = Licensing.LicenseManager.Check();
+            if (!license.IsValid)
+            {
+                using var form = new Licensing.LicenseForm(license);
+                return form.ShowDialog() == DialogResult.OK;
+            }
+
+            if (license.DaysLeft <= 15 &&
+                MessageBox.Show($"The license of this PC ends on {license.Expires:yyyy-MM-dd} ({license.DaysLeft} day(s) left).\n\n" +
+                                "Enter a new license key now?", "License", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
+            {
+                using var form = new Licensing.LicenseForm(license);
+                form.ShowDialog();
+            }
+            return true;
         }
     }
 }

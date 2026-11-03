@@ -110,7 +110,7 @@ namespace Inventory.Reports
 
         public override bool IsTotalRow(object row) => row is PurchasesByInvoiceRow { IsTotal: true };
 
-        // The purchase, read-only (a posted purchase cannot be changed)
+        // The purchase (a posted one opens read-only; Edit there changes it)
         public override void OnRowDoubleClick(IWin32Window owner, object row, ReportFilter filter)
         {
             if (row is not PurchasesByInvoiceRow { IsTotal: false } invoice) return;

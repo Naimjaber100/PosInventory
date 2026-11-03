@@ -1,0 +1,59 @@
+-- Printed receipts (cashier, 80 mm printer): everything one receipt needs in a single call, so printing
+-- right after a sale costs one quick database trip. Also used to reprint an old invoice (Sales F7).
+-- Safe to re-run. Apply after pos_functions.sql (it adds the promo_name columns).
+-- Apply:  psql -h localhost -U postgres -d Pos -f receipt_functions.sql
+
+DROP FUNCTION IF EXISTS public.fn_sale_receipt(integer);
+
+-- One sale or return as JSON:
+-- { company: {name, address, mobile, email, vat_number},
+--   invoice_no, invoice_type (1 sale, 2 return), invoice_date, cashier, customer, customer_phone, customer_address,
+--   sub_total, line_discounts, discount, promo_name, total, change_lbp, usd_rate, primary_code,
+--   vat_amount, vat_included (NULL = no TVA), vat_lines: [{ rate, base (without TVA), vat }] one per rate,
+--   lines:    [{ item_name, quantity, unit_price, discount, promo_name, line_total }],
+--   payments: [{ method (1 cash, 2 card, 3 account), currency, amount, amount_lbp }] }
+-- promo_name: the promotion a line's discount / the invoice discount came from (Database/promotion_functions.sql).
+-- NULL when the sale does not exist.
+CREATE OR REPLACE FUNCTION public.fn_sale_receipt(p_sale_id integer)
+RETURNS jsonb
+LANGUAGE sql STABLE
+AS $$
+    SELECT jsonb_build_object(
+        'company', (SELECT jsonb_build_object('name', c.name, 'address', c.address, 'mobile', c.mobile,
+                                              'email', c.email, 'vat_number', c.vat_number)
+                    FROM company c ORDER BY c.company_id LIMIT 1),
+        'invoice_no', si.invoice_no,
+        'invoice_type', si.invoice_type,
+        'invoice_date', si.invoice_date,
+        'cashier', u.full_name,
+        'customer', CASE WHEN cu.customer_id IS NOT NULL AND cu.customer_id <> 1 THEN cu.name END,
+        'customer_phone', CASE WHEN cu.customer_id <> 1 THEN cu.phone END,
+        'customer_address', CASE WHEN cu.customer_id <> 1 THEN cu.address END,
+        'sub_total', si.sub_total,
+        'line_discounts', (SELECT coalesce(sum(l.discount), 0) FROM sales_lines l WHERE l.sale_id = si.sale_id),
+        'discount', si.discount,
+        'promo_name', si.promo_name,
+        'total', si.total,
+        'change_lbp', si.change_lbp,
+        'usd_rate', si.exchange_rate,
+        'primary_code', (SELECT code FROM currencies WHERE is_primary),
+        'vat_amount', si.vat_amount,
+        'vat_included', si.vat_included,
+        'vat_lines', coalesce((SELECT jsonb_agg(jsonb_build_object('rate', v.vat_rate, 'base', v.base, 'vat', v.vat) ORDER BY v.vat_rate)
+                               FROM (SELECT l.vat_rate, sum(l.line_total - l.vat_amount) AS base, sum(l.vat_amount) AS vat
+                                     FROM sales_lines l WHERE l.sale_id = si.sale_id AND si.vat_included IS NOT NULL
+                                     GROUP BY l.vat_rate) v), '[]'::jsonb),
+        'lines', coalesce((SELECT jsonb_agg(jsonb_build_object(
+                                'item_name', l.description, 'quantity', l.quantity, 'unit_price', l.unit_price,
+                                'discount', l.discount, 'promo_name', l.promo_name, 'line_total', round(l.quantity * l.unit_price - l.discount, 2))
+                            ORDER BY l.line_no)
+                           FROM sales_lines l WHERE l.sale_id = si.sale_id), '[]'::jsonb),
+        'payments', coalesce((SELECT jsonb_agg(jsonb_build_object(
+                                'method', p.method, 'currency', trim(p.currency), 'amount', p.amount, 'amount_lbp', p.amount_lbp)
+                            ORDER BY p.payment_id)
+                           FROM sales_payments p WHERE p.sale_id = si.sale_id), '[]'::jsonb))
+    FROM sales_invoices si
+    LEFT JOIN users u ON u.user_id = si.user_id
+    LEFT JOIN customers cu ON cu.customer_id = si.customer_id
+    WHERE si.sale_id = p_sale_id;
+$$;

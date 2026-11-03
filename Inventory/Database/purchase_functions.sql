@@ -278,11 +278,84 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------
--- Saves a purchase invoice (new when p_purchase_id is NULL, otherwise updates a draft).
+-- Undoes the posting of a purchase or return, so it can be changed and posted again (fn_purchase_save):
+--   - purchase: its goods come out of stock and their cost is taken out of the average cost
+--     (as a return does), what we owe the supplier goes down by its total;
+--   - return: its goods go back into stock at their cost, what we owe the supplier goes up again;
+--   - stock ledger: the opposite movement of the posting (same type, same document), noted 'Edited';
+--   - it goes back to status 0, keeping its number (posting again keeps it).
+-- Only from fn_purchase_save, in the same transaction as the posting again.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.fn_purchase_unpost(p_purchase_id integer, p_user_id integer)
+RETURNS void
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_inv   purchase_invoices%ROWTYPE;
+    v_sub   numeric;
+    v_ratio numeric;
+BEGIN
+    SELECT * INTO v_inv FROM purchase_invoices WHERE purchase_id = p_purchase_id FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Purchase invoice % not found.', p_purchase_id; END IF;
+    IF v_inv.status <> 1 THEN RAISE EXCEPTION 'Only a posted purchase can be changed this way.'; END IF;
+
+    -- Quantity and cost per base unit per product, as the posting computed them (the lines have not changed since)
+    SELECT sum(line_total) INTO v_sub FROM purchase_lines WHERE purchase_id = p_purchase_id;
+    v_ratio := CASE WHEN coalesce(v_sub, 0) = 0 THEN 1 ELSE v_inv.total / v_sub END;
+
+    IF to_regclass('pg_temp._undo') IS NOT NULL THEN DROP TABLE pg_temp._undo; END IF;
+    CREATE TEMP TABLE _undo ON COMMIT DROP AS
+    SELECT product_id,
+           sum(base_qty) AS qty,
+           sum(line_total) * v_ratio * v_inv.currency_rate / sum(base_qty) AS cost
+    FROM purchase_lines WHERE purchase_id = p_purchase_id
+    GROUP BY product_id;
+
+    PERFORM 1 FROM products WHERE product_id IN (SELECT product_id FROM _undo) ORDER BY product_id FOR UPDATE;
+
+    IF v_inv.doc_type = 1 THEN
+        UPDATE products p
+        SET avg_cost  = CASE WHEN p.stock_qty - u.qty > 0 AND p.stock_qty * p.avg_cost - u.qty * u.cost > 0
+                             THEN (p.stock_qty * p.avg_cost - u.qty * u.cost) / (p.stock_qty - u.qty)
+                             ELSE p.avg_cost END,
+            stock_qty = p.stock_qty - u.qty,
+            updated_at = now()
+        FROM _undo u WHERE p.product_id = u.product_id;
+
+        INSERT INTO stock_movements (product_id, movement_type, quantity, unit_cost, balance_after, ref_type, ref_id, user_id, notes)
+        SELECT u.product_id, 1, -u.qty, u.cost, p.stock_qty, 1, p_purchase_id, p_user_id, 'Edited: posting undone'
+        FROM _undo u JOIN products p ON p.product_id = u.product_id;
+
+        UPDATE suppliers SET balance_lbp = balance_lbp - v_inv.total_lbp WHERE supplier_id = v_inv.supplier_id;
+    ELSE
+        UPDATE products p
+        SET avg_cost  = CASE WHEN p.stock_qty <= 0 THEN u.cost
+                             ELSE (p.stock_qty * p.avg_cost + u.qty * u.cost) / (p.stock_qty + u.qty) END,
+            stock_qty = p.stock_qty + u.qty,
+            updated_at = now()
+        FROM _undo u WHERE p.product_id = u.product_id;
+
+        INSERT INTO stock_movements (product_id, movement_type, quantity, unit_cost, balance_after, ref_type, ref_id, user_id, notes)
+        SELECT u.product_id, 4, u.qty, u.cost, p.stock_qty, 1, p_purchase_id, p_user_id, 'Edited: posting undone'
+        FROM _undo u JOIN products p ON p.product_id = u.product_id;
+
+        UPDATE suppliers SET balance_lbp = balance_lbp + v_inv.total_lbp WHERE supplier_id = v_inv.supplier_id;
+    END IF;
+
+    UPDATE purchase_invoices SET status = 0 WHERE purchase_id = p_purchase_id;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- Saves a purchase invoice (new when p_purchase_id is NULL, otherwise updates a draft or a posted one).
 -- p_lines is a JSON array: [{ "packaging_id": 12, "quantity": 10, "unit_cost": 30000 }, ...]
 --   (item and pack size come from the packaging; line totals are recalculated here).
 -- p_post = true also posts it through fn_post_purchase: stock and average cost are
---   updated, the invoice gets its number and can no longer be changed.
+--   updated, the invoice gets its number.
+-- A posted purchase / return can be changed too (p_post must be true): its posting is undone
+--   (fn_purchase_unpost) and it is posted again with the changes, keeping its number, posted date and poster.
+--   Its type cannot change. Refused when the changes do not fit what already happened to it:
+--   a purchase cannot go below what was paid on it nor below what was already returned of it,
+--   and its supplier cannot change once it has payments or returns.
 -- p_currency = the invoice currency (NULL = primary); unit costs and the discount are in it.
 -- p_currency_rate = 1 unit of it in the primary currency (NULL = today's rate; always 1 for the primary).
 -- p_doc_type = 2: a return to the supplier (Type on the purchase screen; a draft can still change it).
@@ -318,10 +391,12 @@ DECLARE
     v_cur_rate numeric;
     v_doc_type smallint := coalesce(p_doc_type, 1);
     v_return_of integer := p_return_of_id;
+    v_old      purchase_invoices%ROWTYPE;   -- a posted one being changed: as it was
+    v_bad      text;
 BEGIN
     -- A draft keeps the purchase it is a return of; its type can change until it is posted (not when it is of a purchase)
     IF v_id IS NOT NULL THEN
-        SELECT CASE WHEN return_of_id IS NULL THEN coalesce(p_doc_type, doc_type) ELSE doc_type END, return_of_id
+        SELECT CASE WHEN return_of_id IS NULL AND status = 0 THEN coalesce(p_doc_type, doc_type) ELSE doc_type END, return_of_id
         INTO v_doc_type, v_return_of
         FROM purchase_invoices WHERE purchase_id = v_id;
         IF NOT FOUND THEN RAISE EXCEPTION 'Purchase invoice % not found.', v_id; END IF;
@@ -373,7 +448,29 @@ BEGIN
     ELSE
         SELECT status INTO v_status FROM purchase_invoices WHERE purchase_id = v_id FOR UPDATE;
         IF NOT FOUND THEN RAISE EXCEPTION 'Purchase invoice % not found.', v_id; END IF;
-        IF v_status <> 0 THEN RAISE EXCEPTION 'This purchase is already posted or cancelled and cannot be changed.'; END IF;
+        IF v_status = 2 THEN RAISE EXCEPTION 'This purchase is cancelled and cannot be changed.'; END IF;
+
+        -- Posted: undo its posting first; it is posted again below with the changes
+        IF v_status = 1 THEN
+            IF NOT p_post THEN RAISE EXCEPTION 'A posted purchase cannot go back to a draft: save and post it again.'; END IF;
+            SELECT * INTO v_old FROM purchase_invoices WHERE purchase_id = v_id;
+            IF p_supplier_id IS DISTINCT FROM v_old.supplier_id THEN
+                IF v_old.paid_lbp > 0 OR EXISTS (SELECT 1 FROM supplier_payments WHERE purchase_id = v_id) THEN
+                    RAISE EXCEPTION 'Payments were made on this purchase: its supplier cannot change.';
+                END IF;
+                IF EXISTS (SELECT 1 FROM purchase_invoices WHERE return_of_id = v_id AND status <> 2) THEN
+                    RAISE EXCEPTION 'Goods of this purchase went back to the supplier: its supplier cannot change.';
+                END IF;
+            END IF;
+
+            -- Stock of its items before the change: the change may not leave less than nothing (see below)
+            IF to_regclass('pg_temp._edit_stock') IS NOT NULL THEN DROP TABLE pg_temp._edit_stock; END IF;
+            CREATE TEMP TABLE _edit_stock ON COMMIT DROP AS
+            SELECT product_id, stock_qty FROM products
+            WHERE product_id IN (SELECT product_id FROM purchase_lines WHERE purchase_id = v_id);
+
+            PERFORM fn_purchase_unpost(v_id, p_user_id);
+        END IF;
 
         UPDATE purchase_invoices
         SET supplier_id = p_supplier_id,
@@ -430,6 +527,43 @@ BEGIN
 
     IF p_post THEN
         PERFORM fn_post_purchase(v_id, p_user_id);
+    END IF;
+
+    -- A posted one changed: checks against what already happened to it, then it keeps its first posting's date and poster
+    IF v_old.purchase_id IS NOT NULL THEN
+        IF v_doc_type = 1 THEN
+            IF v_old.paid_lbp > (SELECT total_lbp FROM purchase_invoices WHERE purchase_id = v_id) THEN
+                RAISE EXCEPTION '% was already paid on this purchase: its total cannot be less than that.', trim_scale(v_old.paid_lbp);
+            END IF;
+
+            SELECT fn_item_description(p.name::text, p.size::text, p.color::text, pk.name::text)
+                   || ': ' || trim_scale(r.qty) || ' already went back to the supplier.'
+            INTO v_bad
+            FROM (SELECT l.packaging_id, sum(l.quantity) AS qty
+                  FROM purchase_invoices ri JOIN purchase_lines l ON l.purchase_id = ri.purchase_id
+                  WHERE ri.return_of_id = v_id AND ri.doc_type = 2 AND ri.status = 1
+                  GROUP BY l.packaging_id) r
+            JOIN product_packaging pk ON pk.packaging_id = r.packaging_id
+            JOIN products p ON p.product_id = pk.product_id
+            LEFT JOIN (SELECT packaging_id, sum(quantity) AS qty FROM purchase_lines WHERE purchase_id = v_id
+                       GROUP BY packaging_id) n ON n.packaging_id = r.packaging_id
+            WHERE coalesce(n.qty, 0) < r.qty
+            LIMIT 1;
+            IF v_bad IS NOT NULL THEN RAISE EXCEPTION '%', v_bad; END IF;
+
+            -- Less bought than was already sold: refused unless negative stock is allowed
+            IF fn_setting('allow_negative_stock', '1') <> '1' THEN
+                SELECT fn_item_description(p.name, p.size, p.color, NULL) || ': some were already sold, the change would leave '
+                       || trim_scale(p.stock_qty) || ' ' || p.base_unit || ' in stock.'
+                INTO v_bad
+                FROM _edit_stock b JOIN products p ON p.product_id = b.product_id
+                WHERE p.stock_qty < 0 AND p.stock_qty < b.stock_qty
+                LIMIT 1;
+                IF v_bad IS NOT NULL THEN RAISE EXCEPTION '%', v_bad; END IF;
+            END IF;
+        END IF;
+
+        UPDATE purchase_invoices SET posted_at = v_old.posted_at, posted_by = v_old.posted_by WHERE purchase_id = v_id;
     END IF;
 
     RETURN v_id;

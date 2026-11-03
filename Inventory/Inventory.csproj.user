@@ -52,6 +52,9 @@
     <Compile Update="Item.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Update="Licensing\LicenseForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Update="LoginForm.cs">
       <SubType>Form</SubType>
     </Compile>

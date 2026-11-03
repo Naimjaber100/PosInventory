@@ -1,0 +1,737 @@
+-- Cashier (POS) functions used by the Inventory app (SaleRepository).
+-- Saving a sale uses the existing fn_save_sale, holding uses fn_hold_sale, refunds use fn_save_sale_return.
+-- Safe to re-run: functions are dropped and recreated.
+-- Apply:  psql -h localhost -U postgres -d Pos -f pos_functions.sql
+
+DROP FUNCTION IF EXISTS public.fn_pos_find_item(text, integer);
+DROP FUNCTION IF EXISTS public.fn_pos_get_held_sales();
+DROP FUNCTION IF EXISTS public.fn_pos_get_held_lines(integer);
+DROP FUNCTION IF EXISTS public.fn_pos_delete_held(integer);
+DROP FUNCTION IF EXISTS public.fn_pos_find_sales(text, integer);       -- old refund-by-invoice lookups (removed)
+DROP FUNCTION IF EXISTS public.fn_pos_get_sale_lines(integer);
+DROP FUNCTION IF EXISTS public.fn_audit_add(text, text, integer, jsonb);
+DROP FUNCTION IF EXISTS public.fn_save_return(integer, jsonb, integer, text, integer);
+DROP FUNCTION IF EXISTS public.fn_sales_by_user(integer, date, date);
+DROP FUNCTION IF EXISTS public.fn_sale_get_lines(integer);
+
+DROP FUNCTION IF EXISTS public.fn_save_sale(integer, jsonb, jsonb, integer, integer, numeric, integer);   -- before promotions
+DROP FUNCTION IF EXISTS public.fn_pos_item_list(timestamptz);
+DROP VIEW IF EXISTS public.v_pos_items;
+
+-- What is still unpaid of an on-account sale (set by fn_save_sale; Database/customer_payment_functions.sql settles it)
+ALTER TABLE public.sales_invoices ADD COLUMN IF NOT EXISTS due_lbp numeric(18,2) NOT NULL DEFAULT 0;
+
+-- Promotions (Database/promotion_functions.sql): the part of "discount" that came from a promotion, and its name.
+-- discount still holds the whole discount, so the reports did not change.
+ALTER TABLE public.sales_lines    ADD COLUMN IF NOT EXISTS promo_discount numeric(18,2) NOT NULL DEFAULT 0;
+ALTER TABLE public.sales_lines    ADD COLUMN IF NOT EXISTS promo_name     text;
+ALTER TABLE public.sales_invoices ADD COLUMN IF NOT EXISTS promo_discount numeric(18,2) NOT NULL DEFAULT 0;
+ALTER TABLE public.sales_invoices ADD COLUMN IF NOT EXISTS promo_name     text;
+
+-- TVA (Settings > Company: company.vat_enabled, prices_include_vat; each item's rate: products.vat_rate).
+-- Worked out by fn_save_sale / fn_save_return on what each line costs after its share of the invoice discount.
+--   line:    vat_rate (%), vat_amount; line_total = what the customer pays for the line, TVA included;
+--            line_profit = line_total - vat_amount - cost (the TVA is not the shop's money).
+--   invoice: vat_amount = the lines' TVA; vat_included = the prices included it (true) or it was added on top
+--            (false; then total = sub_total - discount + vat_amount); NULL = no TVA charged.
+-- The item column is also added in product_functions.sql, which runs after this file.
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS vat_rate numeric(5,2) NOT NULL DEFAULT 11
+    CONSTRAINT products_vat_rate_check CHECK (vat_rate BETWEEN 0 AND 100);
+ALTER TABLE public.sales_lines    ADD COLUMN IF NOT EXISTS vat_rate     numeric(5,2)  NOT NULL DEFAULT 0;
+ALTER TABLE public.sales_lines    ADD COLUMN IF NOT EXISTS vat_amount   numeric(18,2) NOT NULL DEFAULT 0;
+ALTER TABLE public.sales_invoices ADD COLUMN IF NOT EXISTS vat_amount   numeric(18,2) NOT NULL DEFAULT 0;
+ALTER TABLE public.sales_invoices ADD COLUMN IF NOT EXISTS vat_included boolean;
+
+-- The TVA of an amount at p_rate %: the part of it that is TVA (p_included), or what is added on top of it.
+-- The cashier works it out the same way (Vat.cs), so the total it asks for is the one saved.
+CREATE OR REPLACE FUNCTION public.fn_vat_of(p_amount numeric, p_rate numeric, p_included boolean)
+RETURNS numeric
+LANGUAGE sql IMMUTABLE
+AS $$
+    SELECT round(p_amount * p_rate / CASE WHEN p_included THEN 100 + p_rate ELSE 100 END, 2);
+$$;
+
+-- ---------------------------------------------------------------------------
+-- Sales screen (cashier F7): finished sales and returns between two dates (inclusive), newest first.
+-- p_user_id NULL = every cashier. Numbers are positive; invoice_type 2 = return (subtract it in totals).
+-- payments: how it was paid / refunded, e.g. "LBP 40,000 + USD 1.00".
+-- on_account_lbp: what was left unpaid at the sale; due_lbp: what is still unpaid of it now
+-- (0 = paid, equal = unpaid, between = partly paid; Database/customer_payment_functions.sql).
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.fn_sales_by_user(p_user_id integer, p_from date, p_to date)
+RETURNS TABLE (sale_id integer, invoice_no varchar, invoice_type smallint, invoice_date timestamptz, cashier varchar,
+               item_count bigint, total numeric, profit numeric, payments text,
+               customer varchar, on_account_lbp numeric, due_lbp numeric)
+LANGUAGE sql STABLE
+AS $$
+    SELECT si.sale_id, si.invoice_no, si.invoice_type, si.invoice_date, u.full_name,
+           (SELECT count(*) FROM sales_lines l WHERE l.sale_id = si.sale_id),
+           si.total, si.profit,
+           (SELECT string_agg(trim(p.currency) || ' ' || to_char(p.amount, 'FM999,999,999,990.##')
+                              || CASE p.method WHEN 2 THEN ' card' WHEN 3 THEN ' account' ELSE '' END, ' + ' ORDER BY p.payment_id)
+            FROM sales_payments p WHERE p.sale_id = si.sale_id),
+           CASE WHEN cu.customer_id <> 1 THEN cu.name END,   -- 1 = walk-in customer
+           coalesce((SELECT sum(p.amount_lbp) FROM sales_payments p WHERE p.sale_id = si.sale_id AND p.method = 3), 0),
+           si.due_lbp
+    FROM sales_invoices si
+    LEFT JOIN users u ON u.user_id = si.user_id
+    LEFT JOIN customers cu ON cu.customer_id = si.customer_id
+    WHERE si.status = 1
+      AND (p_user_id IS NULL OR si.user_id = p_user_id)
+      AND si.invoice_date >= p_from::timestamptz
+      AND si.invoice_date <  (p_to + 1)::timestamptz
+    ORDER BY si.invoice_date DESC, si.sale_id DESC;
+$$;
+
+-- The items of one sale or return
+CREATE OR REPLACE FUNCTION public.fn_sale_get_lines(p_sale_id integer)
+RETURNS TABLE (line_no integer, item_name varchar, quantity numeric, unit_price numeric, discount numeric,
+               line_total numeric, line_profit numeric)
+LANGUAGE sql STABLE
+AS $$
+    SELECT l.line_no, l.description, l.quantity, l.unit_price, l.discount + l.discount_share, l.line_total, l.line_profit
+    FROM sales_lines l
+    WHERE l.sale_id = p_sale_id
+    ORDER BY l.line_no;
+$$;
+
+-- A return invoice (invoice_type 2) does not need the original sale: the cashier scans what comes back.
+ALTER TABLE public.sales_invoices DROP CONSTRAINT IF EXISTS sales_invoices_check1;
+
+-- ---------------------------------------------------------------------------
+-- Return invoice from the cashier's Return mode: the items the customer brings back are scanned
+-- like a sale, the money goes back (cash in any active currency with a rate, or card in the primary
+-- currency) and the stock comes back in.
+-- p_lines: [{ "packaging_id": 12, "quantity": 1, "unit_price": 45000, "discount": 0 }, ...]
+-- p_refund_method: 1 cash, 2 card. Numbers are positive like the sale; invoice_type 2 makes it a return
+-- (reports subtract it). Returns the new return invoice (number R-...). All or nothing.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.fn_save_return(
+    p_user_id integer, p_lines jsonb, p_refund_method integer DEFAULT 1, p_refund_currency text DEFAULT 'LBP',
+    p_shift_id integer DEFAULT NULL)
+RETURNS TABLE (return_id integer, invoice_no text, refund_lbp numeric, refund_amount numeric)
+LANGUAGE plpgsql
+AS $$
+#variable_conflict use_column
+DECLARE
+    v_rate     numeric := fn_current_rate();
+    v_count    int;
+    v_refund   numeric;
+    v_cost     numeric;
+    v_vat      numeric := 0;
+    v_vat_on   boolean;
+    v_vat_incl boolean;
+    v_amount   numeric;
+    v_msg      text;
+    v_id       int;
+    v_no       text;
+BEGIN
+    IF v_rate IS NULL THEN RAISE EXCEPTION 'Set the exchange rate first.'; END IF;
+    IF p_refund_method NOT IN (1, 2)
+       OR NOT EXISTS (SELECT 1 FROM currencies c WHERE c.code = upper(p_refund_currency) AND c.is_active)
+       OR fn_currency_rate(p_refund_currency) IS NULL
+       OR (p_refund_method = 2 AND NOT EXISTS (SELECT 1 FROM currencies c WHERE c.code = upper(p_refund_currency) AND c.is_primary)) THEN
+        RAISE EXCEPTION 'Refund method or currency is not valid (card refunds are in the primary currency).';
+    END IF;
+    IF p_lines IS NULL OR jsonb_typeof(p_lines) <> 'array' OR jsonb_array_length(p_lines) = 0 THEN
+        RAISE EXCEPTION 'Scan the items that come back first.';
+    END IF;
+    IF p_shift_id IS NOT NULL THEN
+        PERFORM 1 FROM shifts WHERE shift_id = p_shift_id AND status = 1 FOR SHARE;
+        IF NOT FOUND THEN RAISE EXCEPTION 'This shift is closed. Open a new shift first.'; END IF;
+    END IF;
+
+    -- 1. Lines with item data (an item no longer sold can still come back)
+    IF to_regclass('pg_temp._rl') IS NOT NULL THEN DROP TABLE pg_temp._rl; END IF;
+    CREATE TEMP TABLE _rl ON COMMIT DROP AS
+    SELECT x.ord::int AS line_no, pk.packaging_id, p.product_id, p.product_type, p.is_weighted,
+           fn_item_description(p.name, p.size, p.color, pk.name) AS description,
+           (x.j->>'quantity')::numeric(18,3) AS quantity, pk.factor,
+           coalesce((x.j->>'unit_price')::numeric, pk.sale_price)::numeric(18,2) AS unit_price,
+           coalesce((x.j->>'discount')::numeric, 0)::numeric(18,2) AS discount,
+           0::numeric(18,4) AS unit_cost,
+           0::numeric(18,2) AS refund,
+           p.vat_rate::numeric(5,2) AS vat_rate,
+           0::numeric(18,2) AS vat
+    FROM jsonb_array_elements(p_lines) WITH ORDINALITY AS x(j, ord)
+    JOIN product_packaging pk ON pk.packaging_id = (x.j->>'packaging_id')::int
+    JOIN products p ON p.product_id = pk.product_id AND p.product_type IN (1, 2);
+
+    SELECT count(*) INTO v_count FROM _rl;
+    IF v_count <> jsonb_array_length(p_lines) THEN RAISE EXCEPTION 'An item on the return was not found.'; END IF;
+    IF EXISTS (SELECT 1 FROM _rl WHERE quantity IS NULL OR quantity <= 0 OR unit_price < 0 OR discount < 0
+                                   OR discount > quantity * unit_price) THEN
+        RAISE EXCEPTION 'Check quantities, prices and discounts on the return.';
+    END IF;
+    SELECT description INTO v_msg FROM _rl WHERE NOT is_weighted AND quantity <> trunc(quantity) LIMIT 1;
+    IF v_msg IS NOT NULL THEN RAISE EXCEPTION '"%" comes back in whole units only.', v_msg; END IF;
+
+    -- 2. Stock back in per real item (bundles -> their components)
+    IF to_regclass('pg_temp._rback') IS NOT NULL THEN DROP TABLE pg_temp._rback; END IF;
+    CREATE TEMP TABLE _rback ON COMMIT DROP AS
+    SELECT product_id, sum(qty)::numeric(18,3) AS qty FROM (
+        SELECT product_id, quantity * factor AS qty FROM _rl WHERE product_type = 1
+        UNION ALL
+        SELECT b.component_product_id, l.quantity * l.factor * b.quantity
+        FROM _rl l JOIN bundle_items b ON b.bundle_product_id = l.product_id
+        WHERE l.product_type = 2
+    ) s GROUP BY product_id;
+
+    PERFORM 1 FROM products WHERE product_id IN (SELECT product_id FROM _rback) ORDER BY product_id FOR UPDATE;
+
+    -- 3. Cost now (average cost x factor), refund per line
+    UPDATE _rl l SET unit_cost = p.avg_cost * l.factor
+    FROM products p WHERE p.product_id = l.product_id AND l.product_type = 1;
+    UPDATE _rl l SET unit_cost = l.factor * coalesce((
+        SELECT sum(c.avg_cost * b.quantity) FROM bundle_items b
+        JOIN products c ON c.product_id = b.component_product_id
+        WHERE b.bundle_product_id = l.product_id), 0)
+    WHERE l.product_type = 2;
+    UPDATE _rl SET refund = round(quantity * unit_price - discount, 2);
+
+    -- TVA as on a sale (the settings and rates of today): taken out of the refund, or added to it
+    SELECT c.vat_enabled, c.prices_include_vat INTO v_vat_on, v_vat_incl FROM company c WHERE c.company_id = 1;
+    v_vat_on := coalesce(v_vat_on, false);
+    v_vat_incl := coalesce(v_vat_incl, true);
+    IF v_vat_on THEN
+        UPDATE _rl SET vat = fn_vat_of(refund, vat_rate, v_vat_incl);
+        IF NOT v_vat_incl THEN UPDATE _rl SET refund = refund + vat; END IF;
+        SELECT sum(vat) INTO v_vat FROM _rl;
+    END IF;
+
+    SELECT sum(refund), sum(round(quantity * unit_cost, 2)) INTO v_refund, v_cost FROM _rl;
+    IF v_refund <= 0 THEN RAISE EXCEPTION 'There is nothing to refund.'; END IF;
+    v_amount := round(v_refund / fn_currency_rate(p_refund_currency),
+                      (SELECT c.decimals FROM currencies c WHERE c.code = upper(p_refund_currency)));
+
+    -- 4. Save
+    v_no := fn_next_doc_no('R');
+
+    INSERT INTO sales_invoices (invoice_no, invoice_type, shift_id, user_id, exchange_rate,
+                                sub_total, discount, total, total_cost, profit, status, vat_amount, vat_included)
+    VALUES (v_no, 2, p_shift_id, p_user_id, v_rate, v_refund - CASE WHEN v_vat_incl THEN 0 ELSE v_vat END, 0, v_refund,
+            v_cost, v_refund - v_vat - v_cost, 1, v_vat, CASE WHEN v_vat_on THEN v_vat_incl END)
+    RETURNING sale_id INTO v_id;
+
+    INSERT INTO sales_lines (sale_id, line_no, product_id, packaging_id, description, quantity, factor,
+                             unit_price, discount, unit_cost, line_total, line_profit, vat_rate, vat_amount)
+    SELECT v_id, line_no, product_id, packaging_id, description, quantity, factor,
+           unit_price, discount, unit_cost, refund, refund - vat - round(quantity * unit_cost, 2),
+           CASE WHEN v_vat_on THEN vat_rate ELSE 0 END, vat
+    FROM _rl ORDER BY line_no;
+
+    INSERT INTO sales_line_components (sale_line_id, product_id, base_qty_per_unit, unit_cost)
+    SELECT sl.sale_line_id, b.component_product_id, l.factor * b.quantity, c.avg_cost
+    FROM _rl l
+    JOIN sales_lines sl ON sl.sale_id = v_id AND sl.line_no = l.line_no
+    JOIN bundle_items b ON b.bundle_product_id = l.product_id
+    JOIN products c ON c.product_id = b.component_product_id
+    WHERE l.product_type = 2;
+
+    INSERT INTO sales_payments (sale_id, method, currency, amount, amount_lbp)
+    VALUES (v_id, p_refund_method, upper(p_refund_currency), v_amount, v_refund);
+
+    -- 5. Stock IN + ledger (movement 3 = return)
+    UPDATE products p SET stock_qty = p.stock_qty + b.qty, updated_at = now()
+    FROM _rback b WHERE p.product_id = b.product_id;
+
+    INSERT INTO stock_movements (product_id, movement_type, quantity, unit_cost, balance_after, ref_type, ref_id, user_id)
+    SELECT b.product_id, 3, b.qty, p.avg_cost, p.stock_qty, 2, v_id, p_user_id
+    FROM _rback b JOIN products p ON p.product_id = b.product_id;
+
+    RETURN QUERY SELECT v_id, v_no, v_refund, v_amount;
+END $$;
+
+-- Adds a row to audit_log for the logged-in user (fn_app_user_id, Database/user_tracking.sql),
+-- e.g. a refund approved by a manager.
+CREATE OR REPLACE FUNCTION public.fn_audit_add(p_action text, p_table_name text, p_record_id integer, p_details jsonb)
+RETURNS void
+LANGUAGE sql
+AS $$
+    INSERT INTO audit_log (user_id, action, table_name, record_id, details)
+    VALUES (fn_app_user_id(), p_action, p_table_name, p_record_id, p_details);
+$$;
+
+-- ---------------------------------------------------------------------------
+-- Packagings that can be sold (active, can_sell, standard items and bundles).
+-- An exact barcode match returns just that packaging (scanner); otherwise every
+-- word must appear in the item name, or the text is in the barcode (any part:
+-- "6663" finds 145556663). stock_qty is in base units (for bundles: how many can be made from the components).
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.fn_pos_find_item(p_search text, p_limit integer DEFAULT 30)
+RETURNS TABLE (
+    packaging_id integer, product_id integer, item_name text, packaging_name varchar, barcode varchar,
+    sale_price numeric, factor numeric, is_weighted boolean, base_unit varchar, stock_qty numeric, vat_rate numeric)
+LANGUAGE plpgsql STABLE
+AS $$
+DECLARE
+    v_search  text := nullif(trim(p_search), '');
+    v_pattern text;
+    v_words   text[];
+BEGIN
+    IF v_search IS NULL THEN RETURN; END IF;
+
+    RETURN QUERY
+    SELECT pk.packaging_id, p.product_id,
+           fn_item_description(p.name::text, p.size::text, p.color::text, pk.name::text),
+           pk.name, pk.barcode, pk.sale_price, pk.factor, p.is_weighted, p.base_unit,
+           CASE WHEN p.product_type = 2
+                THEN (SELECT min(floor(c.stock_qty / b.quantity)) FROM bundle_items b
+                      JOIN products c ON c.product_id = b.component_product_id WHERE b.bundle_product_id = p.product_id)
+                ELSE p.stock_qty END,
+           p.vat_rate
+    FROM product_packaging pk
+    JOIN products p ON p.product_id = pk.product_id
+    WHERE pk.barcode = v_search
+      AND pk.is_active AND pk.can_sell AND p.is_active AND p.product_type IN (1, 2);
+    IF FOUND THEN RETURN; END IF;
+
+    -- The same label written another way: saved without its check digit, or with / without a leading 0
+    -- (fn_barcode_variants, Database/product_functions.sql)
+    RETURN QUERY
+    SELECT pk.packaging_id, p.product_id,
+           fn_item_description(p.name::text, p.size::text, p.color::text, pk.name::text),
+           pk.name, pk.barcode, pk.sale_price, pk.factor, p.is_weighted, p.base_unit,
+           CASE WHEN p.product_type = 2
+                THEN (SELECT min(floor(c.stock_qty / b.quantity)) FROM bundle_items b
+                      JOIN products c ON c.product_id = b.component_product_id WHERE b.bundle_product_id = p.product_id)
+                ELSE p.stock_qty END,
+           p.vat_rate
+    FROM product_packaging pk
+    JOIN products p ON p.product_id = pk.product_id
+    WHERE pk.barcode = ANY (fn_barcode_variants(v_search))
+      AND pk.is_active AND pk.can_sell AND p.is_active AND p.product_type IN (1, 2);
+    IF FOUND THEN RETURN; END IF;
+
+    v_pattern := replace(replace(replace(v_search, '\', '\\'), '%', '\%'), '_', '\_');
+    v_words   := regexp_split_to_array(v_pattern, '\s+');
+
+    RETURN QUERY
+    SELECT pk.packaging_id, p.product_id,
+           fn_item_description(p.name::text, p.size::text, p.color::text, pk.name::text),
+           pk.name, pk.barcode, pk.sale_price, pk.factor, p.is_weighted, p.base_unit,
+           CASE WHEN p.product_type = 2
+                THEN (SELECT min(floor(c.stock_qty / b.quantity)) FROM bundle_items b
+                      JOIN products c ON c.product_id = b.component_product_id WHERE b.bundle_product_id = p.product_id)
+                ELSE p.stock_qty END,
+           p.vat_rate
+    FROM product_packaging pk
+    JOIN products p ON p.product_id = pk.product_id
+    WHERE pk.is_active AND pk.can_sell AND p.is_active AND p.product_type IN (1, 2)
+      AND (NOT EXISTS (SELECT 1 FROM unnest(v_words) w WHERE p.name NOT ILIKE '%' || w || '%')
+           OR pk.barcode LIKE '%' || v_pattern || '%')   -- any part of the barcode (index: Database/purchase_functions.sql)
+    ORDER BY p.name, pk.factor, pk.packaging_id
+    LIMIT greatest(coalesce(p_limit, 30), 1);
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- The cashier keeps every sellable item in memory (PosItemCache.cs), so a scan or a name search does not
+-- go to the database. Same columns and rules as fn_pos_find_item, plus:
+--   product_name = what the name search looks in (as fn_pos_find_item: the product name)
+--   scale_code   = on the one packaging fn_pos_find_scale_item would give for a scale label, else NULL
+--   sellable     = false: the item can no longer be sold, the cashier drops it
+--   as_of        = the database time of this answer: the next call asks for what changed since then
+-- p_since NULL = everything that can be sold (the first load).
+-- p_since set  = every packaging of the items whose cashier data changed since then (pos_changed_at, below):
+--                price, barcode, names, pack size, active, scale code, new items. Not the stock: a sale or a
+--                purchase changes nothing the cashier reads, so it does not make the cashiers read again.
+--                The cashier asks a little before its last as_of, so a change still being saved is not missed.
+-- ---------------------------------------------------------------------------
+
+-- Indexes of the first version (it also followed stock changes): no longer used
+DROP INDEX IF EXISTS public.ix_products_updated;
+DROP INDEX IF EXISTS public.ix_packaging_updated;
+DROP INDEX IF EXISTS public.ix_packaging_created;
+DROP INDEX IF EXISTS public.ix_stock_movements_date;
+
+-- When the data the cashier keeps last changed (set by fn_pos_item_stamp, not by stock changes)
+ALTER TABLE public.products          ADD COLUMN IF NOT EXISTS pos_changed_at timestamptz NOT NULL DEFAULT now();
+ALTER TABLE public.product_packaging ADD COLUMN IF NOT EXISTS pos_changed_at timestamptz NOT NULL DEFAULT now();
+CREATE INDEX IF NOT EXISTS ix_products_pos_changed ON public.products (pos_changed_at);
+CREATE INDEX IF NOT EXISTS ix_packaging_pos_changed ON public.product_packaging (pos_changed_at);
+
+-- Every packaging with the item data the cashier needs; sellable = it can be sold now.
+-- scale_code only on the packaging a scale label gives (fn_pos_find_scale_item: piece first, then the default).
+-- Filtering it on product_id or sellable goes into the view (they are what the window is partitioned by).
+CREATE VIEW public.v_pos_items AS
+    SELECT r.packaging_id, r.product_id,
+           fn_item_description(r.name::text, r.size::text, r.color::text, r.pack_name::text) AS item_name,
+           r.pack_name AS packaging_name, r.barcode, r.sale_price, r.factor, r.is_weighted, r.base_unit,
+           CASE WHEN r.product_type = 2
+                THEN (SELECT min(floor(c.stock_qty / b.quantity)) FROM bundle_items b
+                      JOIN products c ON c.product_id = b.component_product_id WHERE b.bundle_product_id = r.product_id)
+                ELSE r.stock_qty END AS stock_qty,
+           r.name AS product_name,
+           CASE WHEN r.sellable AND r.product_type = 1 AND r.scale_code IS NOT NULL
+                     AND row_number() OVER (PARTITION BY r.product_id, r.sellable
+                                            ORDER BY (r.factor = 1) DESC, r.is_default DESC, r.packaging_id) = 1
+                THEN r.scale_code END AS scale_code,
+           r.sellable,
+           r.vat_rate
+    FROM (SELECT pk.packaging_id, p.product_id, p.name, p.size, p.color, pk.name AS pack_name, pk.barcode,
+                 pk.sale_price, pk.factor, pk.is_default, p.is_weighted, p.base_unit, p.product_type, p.scale_code,
+                 p.stock_qty, p.vat_rate,
+                 (pk.is_active AND pk.can_sell AND p.is_active AND p.product_type IN (1, 2)) AS sellable
+          FROM product_packaging pk
+          JOIN products p ON p.product_id = pk.product_id) r;
+
+-- Tells every open cashier at once that its data changed (PostgreSQL NOTIFY on channel 'pos_items'; the cashier
+-- LISTENs on it and reads the change with fn_pos_item_list). Sent when the change is committed:
+--   payload 'changed'           = a price, barcode, name... changed or an item was added: read what changed
+--   payload 'deleted:12,13,...' = these packagings were deleted (a refresh cannot see a deleted row)
+--   payload 'reload'            = too many deleted to list: read the whole list again
+-- fn_pos_item_stamp: before a row is added, or before one of the columns the cashier reads is changed
+-- (trigger argument = those columns): marks the row (pos_changed_at) and tells the cashiers. Stock and cost
+-- changes (sales, purchases, returns) are not in the list, so they do neither. One notification per transaction
+-- (PostgreSQL sends the same notification once), also for an import of thousands of prices.
+CREATE OR REPLACE FUNCTION public.fn_pos_item_stamp()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF TG_OP = 'UPDATE' AND NOT EXISTS (
+        SELECT 1 FROM unnest(TG_ARGV) c WHERE to_jsonb(NEW) -> c IS DISTINCT FROM to_jsonb(OLD) -> c) THEN
+        RETURN NEW;   -- saved again without a change the cashier sees
+    END IF;
+    NEW.pos_changed_at := now();
+    PERFORM pg_notify('pos_items', 'changed');
+    RETURN NEW;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.fn_pos_items_notify()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_ids text;
+BEGIN
+    SELECT string_agg(o.packaging_id::text, ',') INTO v_ids FROM old_rows o;
+    IF v_ids IS NOT NULL THEN
+        PERFORM pg_notify('pos_items', CASE WHEN length(v_ids) > 7000 THEN 'reload' ELSE 'deleted:' || v_ids END);
+    END IF;
+    RETURN NULL;
+END $$;
+
+-- The first version told the cashiers about every change, stock too
+DROP TRIGGER IF EXISTS trg_products_pos_notify ON public.products;
+DROP TRIGGER IF EXISTS trg_packaging_pos_notify ON public.product_packaging;
+DROP TRIGGER IF EXISTS trg_bundle_items_pos_notify ON public.bundle_items;
+
+DROP TRIGGER IF EXISTS trg_products_pos_stamp ON public.products;
+CREATE TRIGGER trg_products_pos_stamp
+    BEFORE INSERT OR UPDATE OF name, size, color, base_unit, is_weighted, is_active, product_type, scale_code, vat_rate
+    ON public.products
+    FOR EACH ROW EXECUTE FUNCTION fn_pos_item_stamp('name', 'size', 'color', 'base_unit', 'is_weighted', 'is_active', 'product_type', 'scale_code', 'vat_rate');
+DROP TRIGGER IF EXISTS trg_packaging_pos_stamp ON public.product_packaging;
+CREATE TRIGGER trg_packaging_pos_stamp
+    BEFORE INSERT OR UPDATE OF product_id, name, factor, barcode, sale_price, is_default, can_sell, is_active
+    ON public.product_packaging
+    FOR EACH ROW EXECUTE FUNCTION fn_pos_item_stamp('product_id', 'name', 'factor', 'barcode', 'sale_price', 'is_default', 'can_sell', 'is_active');
+DROP TRIGGER IF EXISTS trg_packaging_pos_notify_delete ON public.product_packaging;
+CREATE TRIGGER trg_packaging_pos_notify_delete AFTER DELETE ON public.product_packaging
+    REFERENCING OLD TABLE AS old_rows
+    FOR EACH STATEMENT EXECUTE FUNCTION fn_pos_items_notify();
+
+CREATE OR REPLACE FUNCTION public.fn_pos_item_list(p_since timestamptz DEFAULT NULL)
+RETURNS TABLE (
+    packaging_id integer, product_id integer, item_name text, packaging_name varchar, barcode varchar,
+    sale_price numeric, factor numeric, is_weighted boolean, base_unit varchar, stock_qty numeric,
+    product_name varchar, scale_code varchar, sellable boolean, vat_rate numeric, as_of timestamptz)
+LANGUAGE plpgsql STABLE
+AS $$
+DECLARE
+    v_ids integer[];
+BEGIN
+    -- The first load: everything that can be sold
+    IF p_since IS NULL THEN
+        RETURN QUERY SELECT v.*, now() FROM v_pos_items v WHERE v.sellable;
+        RETURN;
+    END IF;
+
+    -- A refresh: the items whose cashier data changed (through their index)
+    SELECT array_agg(DISTINCT x.id) INTO v_ids FROM (
+        SELECT p.product_id AS id FROM products p WHERE p.pos_changed_at > p_since
+        UNION ALL SELECT pk.product_id FROM product_packaging pk WHERE pk.pos_changed_at > p_since
+    ) x;
+    IF v_ids IS NULL THEN RETURN; END IF;
+
+    RETURN QUERY SELECT v.*, now() FROM v_pos_items v WHERE v.product_id = ANY (v_ids);
+END $$;
+-- ---------------------------------------------------------------------------
+-- Held (parked) sales, newest first. A held sale is a sales_invoices row with status 0.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.fn_pos_get_held_sales()
+RETURNS TABLE (sale_id integer, held_at timestamptz, user_name varchar, item_count bigint, total numeric)
+LANGUAGE sql STABLE
+AS $$
+    SELECT si.sale_id, si.invoice_date, u.user_name,
+           (SELECT count(*) FROM sales_lines l WHERE l.sale_id = si.sale_id),
+           si.total
+    FROM sales_invoices si
+    LEFT JOIN users u ON u.user_id = si.user_id
+    WHERE si.status = 0
+    ORDER BY si.invoice_date DESC, si.sale_id DESC;
+$$;
+
+-- The lines of one held sale, with the current item data (for recalling it to the screen).
+CREATE OR REPLACE FUNCTION public.fn_pos_get_held_lines(p_sale_id integer)
+RETURNS TABLE (
+    packaging_id integer, product_id integer, item_name text, packaging_name varchar, barcode varchar,
+    quantity numeric, unit_price numeric, discount numeric, factor numeric, is_weighted boolean,
+    base_unit varchar, stock_qty numeric, vat_rate numeric)
+LANGUAGE sql STABLE
+AS $$
+    SELECT l.packaging_id, l.product_id, l.description::text, pk.name, pk.barcode,
+           l.quantity, l.unit_price, l.discount, pk.factor, p.is_weighted, p.base_unit, p.stock_qty, p.vat_rate
+    FROM sales_lines l
+    JOIN sales_invoices si    ON si.sale_id = l.sale_id AND si.status = 0
+    JOIN product_packaging pk ON pk.packaging_id = l.packaging_id
+    JOIN products p           ON p.product_id = l.product_id
+    WHERE l.sale_id = p_sale_id
+    ORDER BY l.line_no;
+$$;
+
+-- Discards a held sale. Returns false when it was already finished or deleted.
+CREATE OR REPLACE FUNCTION public.fn_pos_delete_held(p_sale_id integer)
+RETURNS boolean
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    DELETE FROM sales_invoices WHERE sale_id = p_sale_id AND status = 0;   -- lines cascade
+    RETURN FOUND;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- Saves and finishes a sale (it was created in the database before; kept here since the multi-currency
+-- change). Payments can be in any active currency of the list: each one is converted with
+-- fn_currency_rate (Database/currency_functions.sql). All or nothing.
+-- Promotions are worked out by the cashier screen, like the prices: a line's "discount" and p_invoice_discount
+-- are the whole discount; "promo_discount" / p_promo_discount say how much of it came from a promotion
+-- ("promo_name" / p_promo_name: which one), for the receipt.
+-- p_lines: [{ "packaging_id": 12, "quantity": 3, "unit_price": 45000, "discount": 15000,
+--             "promo_discount": 15000, "promo_name": "Pepsi 3 for 120,000" }, ...]
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.fn_save_sale(p_user_id integer, p_lines jsonb, p_payments jsonb, p_shift_id integer DEFAULT NULL::integer, p_customer_id integer DEFAULT NULL::integer, p_invoice_discount numeric DEFAULT 0, p_held_sale_id integer DEFAULT NULL::integer, p_promo_discount numeric DEFAULT 0, p_promo_name text DEFAULT NULL::text)
+ RETURNS TABLE(sale_id integer, invoice_no text, total_lbp numeric, change_lbp numeric)
+ LANGUAGE plpgsql
+AS $function$
+#variable_conflict use_column
+DECLARE
+    v_rate       numeric := fn_current_rate();
+    v_disc       numeric := coalesce(p_invoice_discount, 0);
+    v_promo      numeric := coalesce(p_promo_discount, 0);
+    v_count      int;
+    v_sub        numeric;
+    v_cost       numeric;
+    v_total      numeric;
+    v_paid       numeric;
+    v_cash       numeric;
+    v_on_account numeric;
+    v_change     numeric;
+    v_vat        numeric := 0;
+    v_vat_on     boolean;
+    v_vat_incl   boolean;
+    v_msg        text;
+    v_sale_id    int;
+    v_no         text;
+BEGIN
+    IF v_rate IS NULL THEN RAISE EXCEPTION 'Set the exchange rate first.'; END IF;
+    IF p_lines IS NULL OR jsonb_typeof(p_lines) <> 'array' OR jsonb_array_length(p_lines) = 0 THEN
+        RAISE EXCEPTION 'The invoice has no items.';
+    END IF;
+    p_payments := coalesce(p_payments, '[]'::jsonb);
+
+    -- The shift must be open. FOR SHARE: closing the shift waits until this sale is saved.
+    IF p_shift_id IS NOT NULL THEN
+        PERFORM 1 FROM shifts WHERE shift_id = p_shift_id AND status = 1 FOR SHARE;
+        IF NOT FOUND THEN RAISE EXCEPTION 'This shift is closed. Open a new shift first.'; END IF;
+    END IF;
+
+    -- 1. Lines with item data
+    IF to_regclass('pg_temp._l') IS NOT NULL THEN DROP TABLE pg_temp._l; END IF;
+    CREATE TEMP TABLE _l ON COMMIT DROP AS
+    SELECT x.ord::int                                             AS line_no,
+           pk.packaging_id, p.product_id, p.product_type, p.is_weighted,
+           fn_item_description(p.name, p.size, p.color, pk.name)  AS description,
+           (x.j->>'quantity')::numeric(18,3)                      AS quantity,
+           pk.factor,
+           coalesce((x.j->>'unit_price')::numeric, pk.sale_price)::numeric(18,2) AS unit_price,
+           coalesce((x.j->>'discount')::numeric, 0)::numeric(18,2)              AS discount,
+           coalesce((x.j->>'promo_discount')::numeric, 0)::numeric(18,2)        AS promo_discount,
+           nullif(trim(x.j->>'promo_name'), '')                   AS promo_name,
+           0::numeric(18,4)                                       AS unit_cost,
+           0::numeric(18,2)                                       AS gross,         -- qty x price - line discount
+           0::numeric(18,2)                                       AS disc_share,    -- share of the invoice discount
+           p.vat_rate::numeric(5,2)                               AS vat_rate,
+           0::numeric(18,2)                                       AS vat
+    FROM jsonb_array_elements(p_lines) WITH ORDINALITY AS x(j, ord)
+    JOIN product_packaging pk ON pk.packaging_id = (x.j->>'packaging_id')::int AND pk.is_active AND pk.can_sell
+    JOIN products p ON p.product_id = pk.product_id AND p.is_active AND p.product_type IN (1, 2);
+
+    SELECT count(*) INTO v_count FROM _l;
+    IF v_count <> jsonb_array_length(p_lines) THEN
+        RAISE EXCEPTION 'An item on the invoice cannot be sold (not found or not active).';
+    END IF;
+    IF EXISTS (SELECT 1 FROM _l WHERE quantity IS NULL OR quantity <= 0 OR unit_price < 0 OR discount < 0
+                                   OR discount > quantity * unit_price
+                                   OR promo_discount < 0 OR promo_discount > discount) THEN
+        RAISE EXCEPTION 'Check quantities, prices and discounts on the invoice.';
+    END IF;
+    SELECT description INTO v_msg FROM _l WHERE NOT is_weighted AND quantity <> trunc(quantity) LIMIT 1;
+    IF v_msg IS NOT NULL THEN RAISE EXCEPTION '"%" is sold in whole units only.', v_msg; END IF;
+    SELECT description INTO v_msg FROM _l l
+    WHERE product_type = 2 AND NOT EXISTS (SELECT 1 FROM bundle_items b WHERE b.bundle_product_id = l.product_id) LIMIT 1;
+    IF v_msg IS NOT NULL THEN RAISE EXCEPTION 'Bundle "%" has no items inside it.', v_msg; END IF;
+
+    -- 2. Stock needed per real item (bundles -> their components)
+    IF to_regclass('pg_temp._need') IS NOT NULL THEN DROP TABLE pg_temp._need; END IF;
+    CREATE TEMP TABLE _need ON COMMIT DROP AS
+    SELECT product_id, sum(qty)::numeric(18,3) AS qty FROM (
+        SELECT product_id, quantity * factor AS qty FROM _l WHERE product_type = 1
+        UNION ALL
+        SELECT b.component_product_id, l.quantity * l.factor * b.quantity
+        FROM _l l JOIN bundle_items b ON b.bundle_product_id = l.product_id
+        WHERE l.product_type = 2
+    ) s GROUP BY product_id;
+
+    -- 3. Lock those items (in id order -> no deadlocks between registers) and check stock
+    PERFORM 1 FROM products WHERE product_id IN (SELECT product_id FROM _need) ORDER BY product_id FOR UPDATE;
+
+    IF fn_setting('allow_negative_stock', '1') <> '1' THEN
+        SELECT fn_item_description(p.name, p.size, p.color, NULL) || ': only ' || trim_scale(p.stock_qty) || ' ' || p.base_unit || ' in stock'
+        INTO v_msg
+        FROM _need n JOIN products p ON p.product_id = n.product_id
+        WHERE p.stock_qty < n.qty LIMIT 1;
+        IF v_msg IS NOT NULL THEN RAISE EXCEPTION '%', v_msg; END IF;
+    END IF;
+
+    -- 4. Cost of each line, frozen now (average cost x factor)
+    UPDATE _l l SET unit_cost = p.avg_cost * l.factor
+    FROM products p WHERE p.product_id = l.product_id AND l.product_type = 1;
+
+    UPDATE _l l SET unit_cost = l.factor * coalesce((
+        SELECT sum(c.avg_cost * b.quantity) FROM bundle_items b
+        JOIN products c ON c.product_id = b.component_product_id
+        WHERE b.bundle_product_id = l.product_id), 0)
+    WHERE l.product_type = 2;
+
+    -- 5. Totals. The invoice discount is shared over the lines so that per-item
+    --    sales and profit reports add up exactly to the invoice.
+    UPDATE _l SET gross = round(quantity * unit_price - discount, 2);
+    SELECT sum(gross), sum(round(quantity * unit_cost, 2)) INTO v_sub, v_cost FROM _l;
+    v_total := v_sub - v_disc;
+    IF v_disc < 0 OR v_total < 0 OR v_promo < 0 OR v_promo > v_disc THEN RAISE EXCEPTION 'The invoice discount is not valid.'; END IF;
+
+    IF v_disc > 0 THEN
+        UPDATE _l SET disc_share = round(v_disc * gross / v_sub, 2);
+        UPDATE _l SET disc_share = disc_share + (v_disc - (SELECT sum(disc_share) FROM _l))
+        WHERE line_no = (SELECT line_no FROM _l ORDER BY gross DESC, line_no LIMIT 1);
+    END IF;
+
+    -- TVA of each line, on what it costs after the invoice discount: the part of it that is TVA, or added on top
+    SELECT c.vat_enabled, c.prices_include_vat INTO v_vat_on, v_vat_incl FROM company c WHERE c.company_id = 1;
+    v_vat_on := coalesce(v_vat_on, false);
+    v_vat_incl := coalesce(v_vat_incl, true);
+    IF v_vat_on THEN
+        UPDATE _l SET vat = fn_vat_of(gross - disc_share, vat_rate, v_vat_incl);
+        SELECT sum(vat) INTO v_vat FROM _l;
+        IF NOT v_vat_incl THEN v_total := v_total + v_vat; END IF;
+    END IF;
+
+    -- 6. Payments
+    IF jsonb_typeof(p_payments) <> 'array' OR EXISTS (
+        SELECT 1 FROM jsonb_array_elements(p_payments) AS y(v)
+        WHERE (v->>'method')::int NOT IN (1, 2, 3)
+           OR NOT EXISTS (SELECT 1 FROM currencies c WHERE c.code = v->>'currency' AND c.is_active)
+           OR fn_currency_rate(v->>'currency') IS NULL
+           OR coalesce((v->>'amount')::numeric, 0) <= 0) THEN
+        RAISE EXCEPTION 'A payment line is not valid (unknown currency, or no exchange rate for it).';
+    END IF;
+
+    SELECT coalesce(sum(lbp), 0),
+           coalesce(sum(lbp) FILTER (WHERE method = 1), 0),
+           coalesce(sum(lbp) FILTER (WHERE method = 3), 0)
+    INTO v_paid, v_cash, v_on_account
+    FROM (SELECT (v->>'method')::int AS method,
+                 round((v->>'amount')::numeric * fn_currency_rate(v->>'currency'), 2) AS lbp
+          FROM jsonb_array_elements(p_payments) AS y(v)) pay;
+
+    IF v_paid < v_total THEN
+        RAISE EXCEPTION 'Paid % is less than the total %.',
+            to_char(v_paid, 'FM999,999,999,990'), to_char(v_total, 'FM999,999,999,990');
+    END IF;
+    v_change := v_paid - v_total;
+    -- Change comes out of the cash drawer only: card + on account may not be more than the total
+    IF v_change > v_cash THEN
+        RAISE EXCEPTION 'Card and on-account amounts are more than the total. Only cash can give change.';
+    END IF;
+    IF v_on_account > 0 THEN
+        IF p_customer_id IS NULL THEN RAISE EXCEPTION 'Choose a customer for an on-account sale.'; END IF;
+        PERFORM 1 FROM customers WHERE customer_id = p_customer_id AND is_active FOR UPDATE;   -- one register at a time
+        IF NOT FOUND THEN RAISE EXCEPTION 'Customer not found.'; END IF;
+        SELECT name || ': credit limit reached' INTO v_msg FROM customers
+        WHERE customer_id = p_customer_id AND credit_limit_lbp IS NOT NULL
+          AND balance_lbp + v_on_account > credit_limit_lbp;
+        IF v_msg IS NOT NULL THEN RAISE EXCEPTION '%', v_msg; END IF;
+    END IF;
+
+    -- 7. Save (a recalled held sale is replaced by the real one, only once)
+    IF p_held_sale_id IS NOT NULL THEN
+        DELETE FROM sales_invoices WHERE sale_id = p_held_sale_id AND status = 0;
+        IF NOT FOUND THEN RAISE EXCEPTION 'This held sale was already finished on another register.'; END IF;
+    END IF;
+
+    v_no := fn_next_doc_no('S');
+
+    INSERT INTO sales_invoices (invoice_no, invoice_type, customer_id, shift_id, user_id, exchange_rate,
+                                sub_total, discount, total, total_cost, profit, change_lbp, status, due_lbp,
+                                promo_discount, promo_name, vat_amount, vat_included)
+    VALUES (v_no, 1, p_customer_id, p_shift_id, p_user_id, v_rate,
+            v_sub, v_disc, v_total, v_cost, v_total - v_vat - v_cost, v_change, 1,
+            v_on_account,   -- unpaid until the client pays (Database/customer_payment_functions.sql)
+            v_promo, CASE WHEN v_promo > 0 THEN nullif(trim(p_promo_name), '') END,
+            v_vat, CASE WHEN v_vat_on THEN v_vat_incl END)
+    RETURNING sale_id INTO v_sale_id;
+
+    -- line_total: what the customer pays for the line, TVA included (added on top when the prices are without it)
+    INSERT INTO sales_lines (sale_id, line_no, product_id, packaging_id, description, quantity, factor,
+                             unit_price, discount, discount_share, unit_cost, line_total, line_profit,
+                             promo_discount, promo_name, vat_rate, vat_amount)
+    SELECT v_sale_id, line_no, product_id, packaging_id, description, quantity, factor,
+           unit_price, discount, disc_share, unit_cost,
+           gross - disc_share + CASE WHEN v_vat_incl THEN 0 ELSE vat END,
+           gross - disc_share - CASE WHEN v_vat_incl THEN vat ELSE 0 END - round(quantity * unit_cost, 2),
+           promo_discount, CASE WHEN promo_discount > 0 THEN promo_name END,
+           CASE WHEN v_vat_on THEN vat_rate ELSE 0 END, vat
+    FROM _l ORDER BY line_no;
+
+    -- Remember what was inside each bundle, so a return puts back exactly that
+    INSERT INTO sales_line_components (sale_line_id, product_id, base_qty_per_unit, unit_cost)
+    SELECT sl.sale_line_id, b.component_product_id, l.factor * b.quantity, c.avg_cost
+    FROM _l l
+    JOIN sales_lines sl ON sl.sale_id = v_sale_id AND sl.line_no = l.line_no
+    JOIN bundle_items b ON b.bundle_product_id = l.product_id
+    JOIN products c ON c.product_id = b.component_product_id
+    WHERE l.product_type = 2;
+
+    INSERT INTO sales_payments (sale_id, method, currency, amount, amount_lbp)
+    SELECT v_sale_id, (v->>'method')::smallint, v->>'currency', (v->>'amount')::numeric,
+           round((v->>'amount')::numeric * fn_currency_rate(v->>'currency'), 2)
+    FROM jsonb_array_elements(p_payments) AS y(v);
+
+    -- 8. Stock OUT + ledger
+    UPDATE products p SET stock_qty = p.stock_qty - n.qty, updated_at = now()
+    FROM _need n WHERE p.product_id = n.product_id;
+
+    INSERT INTO stock_movements (product_id, movement_type, quantity, unit_cost, balance_after, ref_type, ref_id, user_id)
+    SELECT n.product_id, 2, -n.qty, p.avg_cost, p.stock_qty, 2, v_sale_id, p_user_id
+    FROM _need n JOIN products p ON p.product_id = n.product_id;
+
+    IF v_on_account > 0 THEN
+        UPDATE customers SET balance_lbp = balance_lbp + v_on_account WHERE customer_id = p_customer_id;
+    END IF;
+
+    RETURN QUERY SELECT v_sale_id, v_no, v_total, v_change;
+END $function$
+
+;

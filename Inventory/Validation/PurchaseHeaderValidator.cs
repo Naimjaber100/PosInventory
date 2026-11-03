@@ -22,8 +22,11 @@ namespace Inventory.Validation
         {
             var result = new ValidationResult();
 
-            if (!header.IsDraft)
-                result.Add("This purchase is already posted or cancelled and cannot be changed.");
+            // A posted purchase can be changed: it is posted again (fn_purchase_save undoes its first posting)
+            if (header.Status == 2)
+                result.Add("This purchase is cancelled and cannot be changed.");
+            else if (header.Status == 1 && !post)
+                result.Add("A posted purchase cannot go back to a draft: save and post it again.");
 
             // A draft can wait for its supplier; posting adds the total to what we owe the supplier, so it needs one
             if (post && header.SupplierId == null)

@@ -6,7 +6,8 @@ using Inventory.Validation;
 namespace Inventory
 {
     // Add a purchase invoice (no id) or open an existing one (id).
-    // Drafts can be changed; posted / cancelled invoices open read-only.
+    // Drafts can be changed; posted invoices open read-only until Edit is clicked, then Save changes posts them
+    // again with the changes (the database undoes the first posting: stock, cost, supplier balance). Cancelled ones stay read-only.
     // Type: Purchase, or Return to supplier (the items that go back, added like a purchase): posting a return takes
     // them out of stock and lowers what we owe the supplier. A draft can still change its type.
     // Print: what is saved of it, on A4 (PurchasePrint).
@@ -22,6 +23,8 @@ namespace Inventory
         private readonly ComboBox _typeCombo;
         private readonly Label _typeLabel;
         private bool _showingType;
+        private readonly Button _editButton;
+        private bool _editingPosted;   // Edit clicked on a posted purchase
 
         private void TypeLayout()
         {
@@ -53,6 +56,12 @@ namespace Inventory
             var printButton = new Button { Text = "Print", Size = new Size(110, cancelButton.Height), Margin = cancelButton.Margin };
             printButton.Click += async (_, _) => await PrintAsync();
             buttonsPanel.Controls.Add(printButton);
+
+            // Edit (posted purchases only): unlocks the form; saving posts it again with the changes
+            _editButton = new Button { Text = "Edit", Size = new Size(110, cancelButton.Height), Margin = cancelButton.Margin, Visible = false };
+            _editButton.Click += (_, _) => StartEditPosted();
+            buttonsPanel.Controls.Add(_editButton);
+            buttonsPanel.Controls.SetChildIndex(_editButton, 1);   // beside Close
 
             AppTheme.Apply(this);
             _purchaseId = purchaseId;
@@ -88,7 +97,7 @@ namespace Inventory
         /// <summary>The id of the saved purchase (after DialogResult.OK).</summary>
         public int SavedPurchaseId { get; private set; }
 
-        private bool IsReadOnly => !_header.IsDraft;
+        private bool IsReadOnly => !_header.IsDraft && !_editingPosted;
 
         private async void PurchaseEditForm_Load(object? sender, EventArgs e)
         {
@@ -162,7 +171,7 @@ namespace Inventory
 
             headerGroup.Text = !isReturn ? "Invoice"
                 : _header.ReturnOfNo != null ? $"Return to supplier  ·  of purchase {_header.ReturnOfNo}" : "Return to supplier";
-            postButton.Text = isReturn ? "Save && post return" : "Save && post";
+            postButton.Text = !_header.IsDraft ? "Save changes" : isReturn ? "Save && post return" : "Save && post";
             aiButton.Visible = voiceButton.Visible = !isReturn;   // reading a supplier's invoice is for purchases
             if (_purchaseId == null) Text = isReturn ? "New return to supplier" : "New purchase";
             UpdateTotals();
@@ -179,31 +188,57 @@ namespace Inventory
             discountInput.Value = Math.Min(_header.Discount, discountInput.Maximum);
             statusValue.Text = _header.Status switch { 0 => "Draft", 1 => "Posted", _ => "Cancelled" };
 
-            var what = _header.IsReturn ? "return to supplier" : "purchase";
-            Text = _header.IsDraft
-                ? $"Edit {what} (draft #{_header.PurchaseId})"
-                : $"{(_header.IsReturn ? "Return" : "Purchase")} {_header.PurchaseNo} - {statusValue.Text} (read-only)";
+            ShowTitle();
             ShowDocType();
-            if (_header.ReturnOfId != null) supplierCombo.Enabled = addSupplierButton.Visible = false;
-
-            if (IsReadOnly)
-            {
-                supplierInvoiceText.ReadOnly = true;
-                supplierCombo.Enabled = false;
-                currencyCombo.Enabled = false;
-                rateInput.Enabled = false;
-                addSupplierButton.Visible = false;
-                notesText.ReadOnly = true;
-                dateInput.Enabled = false;
-                discountInput.Enabled = false;
-                scanPanel.Enabled = false;
-                linesGrid.ReadOnly = true;
-                linesGrid.AllowUserToDeleteRows = false;
-                saveDraftButton.Visible = false;
-                postButton.Visible = false;
-                cancelButton.Text = "Close";
-            }
+            ApplyReadOnly();
             UpdateTotals();
+        }
+
+        private void ShowTitle()
+        {
+            var what = _header.IsReturn ? "return to supplier" : "purchase";
+            Text = _header.IsDraft ? $"Edit {what} (draft #{_header.PurchaseId})"
+                : _editingPosted ? $"Edit {what} {_header.PurchaseNo} (posted)"
+                : $"{(_header.IsReturn ? "Return" : "Purchase")} {_header.PurchaseNo} - {statusValue.Text} (read-only)";
+        }
+
+        // Locks or unlocks the fields (IsReadOnly); a return of a purchase keeps that purchase's supplier
+        private void ApplyReadOnly()
+        {
+            var readOnly = IsReadOnly;
+            supplierInvoiceText.ReadOnly = readOnly;
+            supplierCombo.Enabled = !readOnly && _header.ReturnOfId == null;
+            addSupplierButton.Visible = !readOnly && _header.ReturnOfId == null;
+            currencyCombo.Enabled = !readOnly;
+            rateInput.Enabled = !readOnly;
+            notesText.ReadOnly = readOnly;
+            dateInput.Enabled = !readOnly;
+            discountInput.Enabled = !readOnly;
+            scanPanel.Enabled = !readOnly;
+            linesGrid.ReadOnly = readOnly;
+            linesGrid.AllowUserToDeleteRows = !readOnly;
+            saveDraftButton.Visible = _header.IsDraft;   // a posted purchase cannot go back to a draft
+            postButton.Visible = !readOnly;
+            _editButton.Visible = readOnly && _header.Status == 1;
+            cancelButton.Text = readOnly ? "Close" : "Cancel";
+        }
+
+        private void StartEditPosted()
+        {
+            var effect = _header.IsReturn
+                ? "Saving takes the old return back (stock and supplier balance) and posts it again with the changes."
+                : "Saving takes the old purchase back (stock, average cost and supplier balance) and posts it again with the changes.";
+            if (MessageBox.Show(this, $"Edit {(_header.IsReturn ? "return" : "purchase")} {_header.PurchaseNo}?\n\n{effect}\nIt keeps its number.",
+                    "Edit", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+                return;
+            _editingPosted = true;
+            ShowTitle();
+            ApplyReadOnly();
+            // Making the grid read-only cleared its columns' own read-only marks: only Qty, Unit cost and Discount can be typed in
+            foreach (DataGridViewColumn column in linesGrid.Columns)
+                column.ReadOnly = column.DataPropertyName is not (nameof(PurchaseEditLine.Quantity) or nameof(PurchaseEditLine.UnitCost) or nameof(PurchaseEditLine.Discount));
+            linesGrid_DataBindingComplete(linesGrid, new DataGridViewBindingCompleteEventArgs(ListChangedType.Reset));
+            if (_header.ReturnOfId == null) supplierCombo.Focus(); else scanBox.Focus();
         }
 
         #region Currency
@@ -699,12 +734,17 @@ namespace Inventory
                 return;
             }
 
-            var question = _header.IsReturn
+            var question = _editingPosted
+                ? $"Save the changes to {_header.PurchaseNo} ({sub - _header.Discount:#,0.##})?\n\n" +
+                  (_header.IsReturn
+                      ? "The old return is taken back and the changed one posted: stock and what we owe the supplier follow the changes."
+                      : "The old purchase is taken back and the changed one posted: stock, average cost and what we owe the supplier follow the changes.")
+                : _header.IsReturn
                 ? $"Post this return to {_header.SupplierName} ({sub - _header.Discount:#,0.##})?\n\n" +
-                  "The items are taken out of stock and what we owe the supplier goes down.\nA posted return cannot be changed."
+                  "The items are taken out of stock and what we owe the supplier goes down."
                 : $"Post this purchase ({sub - _header.Discount:#,0.##})?\n\n" +
-                  "The items are added to stock and the average cost is updated.\nA posted purchase cannot be changed.";
-            if (post && MessageBox.Show(this, question, _header.IsReturn ? "Post return" : "Post purchase",
+                  "The items are added to stock and the average cost is updated.";
+            if (post && MessageBox.Show(this, question, _editingPosted ? "Save changes" : _header.IsReturn ? "Post return" : "Post purchase",
                     MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
                 return;
 
