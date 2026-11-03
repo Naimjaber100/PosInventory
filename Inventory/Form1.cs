@@ -146,6 +146,7 @@ namespace Inventory
 
             _itemsButton = AddGroup(nav, "Item", ItemIcon,
                 ("Item list", b => ShowPage(b, () => new Item())),
+                ("Stock adjustment", b => ShowPage(b, () => new StockAdjustmentsForm())),
                 ("Promotions", b => ShowPage(b, () => new PromotionsForm())),
                 ("POS buttons (cashier)", b => ShowPage(b, () => new QuickButtonsForm())))[0];
             _clientsButton = AddGroup(nav, "Contacts", PeopleIcon,

@@ -15,9 +15,12 @@ namespace Inventory
         private readonly BindingList<PackagingModel> _packagings = new();
         private readonly NumericUpDown _vatRateInput;
         private readonly Label _vatHintLabel;
+        private readonly NumericUpDown _adjustQtyInput;
+        private readonly TextBox _adjustReasonText;
         private readonly int? _productId;
         private readonly int? _defaultCategoryId;
         private string _lastUnit = string.Empty;
+        private decimal _loadedStock;
 
         public AddItemForm() : this(null) { }
 
@@ -40,6 +43,29 @@ namespace Inventory
             stockCard.Controls.Add(_vatRateInput, 0, 5);
             stockCard.Controls.Add(_vatHintLabel, 1, 5);
             stockCard.Height += 76;
+
+            // Stock adjustment (edit only): the new quantity, posted as a stock adjustment when it differs from the stock
+            _adjustQtyInput = new NumericUpDown
+            {
+                DecimalPlaces = 3, Maximum = stockInput.Maximum, ThousandsSeparator = true, Dock = DockStyle.Top,
+                Font = stockInput.Font, Margin = stockInput.Margin, TabIndex = 14,
+            };
+            _adjustReasonText = new TextBox
+            {
+                Dock = DockStyle.Top, Font = stockInput.Font, Margin = new Padding(3, 4, 3, 3), MaxLength = 200, TabIndex = 15,
+                PlaceholderText = "e.g. stock count, damaged, expired",
+            };
+            if (productId.HasValue)
+            {
+                stockCard.RowCount = 8;
+                stockCard.RowStyles.Add(new RowStyle(SizeType.Absolute, 32F));
+                stockCard.RowStyles.Add(new RowStyle(SizeType.Absolute, 44F));
+                stockCard.Controls.Add(new Label { Text = "Adjust stock to", Dock = DockStyle.Fill, Font = costLabel.Font, TextAlign = ContentAlignment.BottomLeft }, 0, 6);
+                stockCard.Controls.Add(new Label { Text = "Adjustment reason", Dock = DockStyle.Fill, Font = costLabel.Font, TextAlign = ContentAlignment.BottomLeft }, 1, 6);
+                stockCard.Controls.Add(_adjustQtyInput, 0, 7);
+                stockCard.Controls.Add(_adjustReasonText, 1, 7);
+                stockCard.Height += 76;
+            }
 
             AppTheme.Apply(this);
             _productId = productId;
@@ -140,6 +166,8 @@ namespace Inventory
             colorText.Text = product.Color;
             costInput.Value = product.AvgCost;
             stockInput.Value = product.StockQty;
+            _loadedStock = Math.Clamp(product.StockQty, _adjustQtyInput.Minimum, _adjustQtyInput.Maximum);
+            _adjustQtyInput.Value = _loadedStock;
             reorderInput.Value = product.ReorderLevel;
             weightedCheck.Checked = product.IsWeighted;
             activeCheck.Checked = product.IsActive;
@@ -160,14 +188,15 @@ namespace Inventory
 
         private void typeCombo_SelectedIndexChanged(object? sender, EventArgs e)
         {
+            // The database only allows stock on standard items (products_check constraint)
+            var isStandard = typeCombo.SelectedValue is short type && type == StandardType;
             if (IsEdit)
             {
                 stockInput.Enabled = false;
+                _adjustQtyInput.Enabled = _adjustReasonText.Enabled = isStandard;
                 return;
             }
 
-            // The database only allows stock on standard items (products_check constraint)
-            var isStandard = typeCombo.SelectedValue is short type && type == StandardType;
             stockInput.Enabled = isStandard;
             if (!isStandard) stockInput.Value = 0;
         }
@@ -529,6 +558,20 @@ namespace Inventory
                 {
                     await _productRepository.UpdateAsync(product, _packagings);
                     productId = _productId!.Value;
+
+                    // Stock adjustment: only when the user changed the quantity (if this fails the item stays saved)
+                    if (_adjustQtyInput.Enabled && _adjustQtyInput.Value != _loadedStock)
+                    {
+                        try
+                        {
+                            await _productRepository.AdjustStockAsync(productId, _adjustQtyInput.Value, NullIfEmpty(_adjustReasonText.Text), AppConfig.CurrentUserId);
+                        }
+                        catch (Exception ex)
+                        {
+                            MessageBox.Show(this, "The item was saved, but not the stock adjustment:\n" + (ex is Npgsql.PostgresException pg ? pg.MessageText : ex.Message),
+                                Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        }
+                    }
                 }
                 else
                 {

@@ -540,6 +540,42 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------
+-- Products: adjust stock (Edit item > "Adjust stock to")
+-- Sets the stock of one standard item to p_new_qty through a one-line stock
+-- adjustment, posted at once by fn_post_stock_adjustment (stock movement type 5).
+-- Returns the adjustment number, or NULL when the stock is already p_new_qty.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.fn_product_adjust_stock(
+    p_product_id integer,
+    p_new_qty    numeric,
+    p_reason     text,
+    p_user_id    integer)
+RETURNS text
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_type  smallint;
+    v_stock numeric;
+    v_id    integer;
+BEGIN
+    IF p_new_qty IS NULL OR p_new_qty < 0 THEN RAISE EXCEPTION 'The new stock quantity cannot be negative.'; END IF;
+
+    SELECT product_type, stock_qty INTO v_type, v_stock FROM products WHERE product_id = p_product_id FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Item % not found.', p_product_id; END IF;
+    IF v_type <> 1 THEN RAISE EXCEPTION 'Only standard items hold stock.'; END IF;
+    IF v_stock = p_new_qty THEN RETURN NULL; END IF;
+
+    INSERT INTO stock_adjustments (reason, user_id)
+    VALUES (coalesce(nullif(trim(p_reason), ''), 'Manual adjustment'), p_user_id)
+    RETURNING adjustment_id INTO v_id;
+
+    INSERT INTO stock_adjustment_lines (adjustment_id, product_id, counted_qty, qty_before)
+    VALUES (v_id, p_product_id, p_new_qty, v_stock);
+
+    RETURN fn_post_stock_adjustment(v_id, p_user_id);
+END $$;
+
+-- ---------------------------------------------------------------------------
 -- Products: delete
 -- Items with history (stock movements, sales, purchases, variants, bundles...)
 -- cannot be removed without breaking that history, so they are deactivated.

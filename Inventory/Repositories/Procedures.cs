@@ -49,6 +49,7 @@ namespace Inventory.Repositories
         public const string UpdateProduct = "fn_product_update";
         public const string DeleteProduct = "fn_product_delete";
         public const string SetProductActive = "fn_product_set_active";
+        public const string AdjustProductStock = "fn_product_adjust_stock";
         public const string GetProductScaleCode = "fn_product_get_scale_code";   // Database/scale_functions.sql
         public const string SetProductScaleCode = "fn_product_set_scale_code";
         public const string PosFindScaleItem = "fn_pos_find_scale_item";
@@ -64,6 +65,13 @@ namespace Inventory.Repositories
         public const string MarkScaleItemsSent = "fn_scale_item_mark_sent";
         public const string ImportProducts = "fn_product_import";
         public const string GetProductPackagings = "fn_product_get_packagings";
+
+        // Stock adjustments (Database/stock_adjustment_functions.sql)
+        public const string GetStockAdjustments = "fn_stock_adjustment_get_all";
+        public const string GetStockAdjustmentLines = "fn_stock_adjustment_get_lines";
+        public const string FindStockAdjustmentItems = "fn_stock_adjustment_find_items";
+        public const string SaveStockAdjustment = "fn_stock_adjustment_save";
+        public const string DeleteStockAdjustment = "fn_stock_adjustment_delete";
 
         // Purchases
         public const string GetAllPurchases = "fn_purchase_get_all";

@@ -106,6 +106,12 @@
     <Compile Update="ShiftsForm.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Update="StockAdjustmentEditForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="StockAdjustmentsForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Update="SupplierEditForm.cs">
       <SubType>Form</SubType>
     </Compile>

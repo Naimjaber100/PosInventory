@@ -74,6 +74,21 @@ namespace Inventory.Repositories
             await ExecuteAsync(Procedures.UpdateProduct, parameters);
         }
 
+        /// <summary>
+        /// Sets the item's stock to newQty through a posted stock adjustment; returns its number
+        /// (null when the stock was already newQty).
+        /// </summary>
+        public async Task<string?> AdjustStockAsync(int productId, decimal newQty, string? reason, int userId)
+        {
+            var parameters = new DynamicParameters();
+            parameters.Add("p_product_id", productId);
+            parameters.Add("p_new_qty", newQty);
+            parameters.Add("p_reason", reason, DbType.String);
+            parameters.Add("p_user_id", userId);
+
+            return await GetSingleAsync<string?>(Procedures.AdjustProductStock, parameters);
+        }
+
         /// <summary>The item's scale code (PLU); null when it is not a scale product.</summary>
         public async Task<string?> GetScaleCodeAsync(int productId)
         {
