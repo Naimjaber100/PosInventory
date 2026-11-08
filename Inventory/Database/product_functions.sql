@@ -219,6 +219,7 @@ RETURNS TABLE (
     product_type smallint, size varchar, color varchar, base_unit varchar, is_weighted boolean,
     avg_cost numeric, stock_qty numeric, reorder_level numeric, sale_price numeric, barcode varchar,
     is_active boolean, created_at timestamptz, updated_at timestamptz, vat_rate numeric,
+    box_unit varchar, box_factor numeric,   -- the biggest active packaging (Box of 6...): the stock is also shown in it
     total_count bigint)
 LANGUAGE plpgsql STABLE
 AS $$
@@ -242,10 +243,15 @@ BEGIN
            p.product_type, p.size, p.color, p.base_unit, p.is_weighted,
            p.avg_cost, p.stock_qty, p.reorder_level, pk.sale_price, pk.barcode,
            p.is_active, p.created_at, p.updated_at, p.vat_rate,
+           bx.name, bx.factor,
            count(*) OVER ()
     FROM products p
     LEFT JOIN categories c         ON c.category_id = p.category_id
     LEFT JOIN product_packaging pk ON pk.product_id = p.product_id AND pk.is_default
+    LEFT JOIN LATERAL (SELECT b.name, b.factor FROM product_packaging b
+                       WHERE b.product_id = p.product_id AND b.is_active AND b.factor > 1
+                       ORDER BY b.factor DESC, b.is_default DESC, b.packaging_id
+                       LIMIT 1) bx ON true
     WHERE (p_category_id IS NULL
            OR (p_category_id = 0 AND p.category_id IS NULL)
            OR p.category_id IN (

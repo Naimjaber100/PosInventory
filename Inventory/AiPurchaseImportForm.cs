@@ -102,7 +102,7 @@ namespace Inventory
             if (_voice)
             {
                 if (transcriptBox.TextLength == 0) { ShowStatus("There is no text to read. Record or choose a voice note first.", Color.DarkGoldenrod); return; }
-                await RunAsync("Reading the text", ct => InvoiceReader.ReadSpokenTextAsync(transcriptBox.Text, ct));
+                await RunAsync("Reading the text", async ct => await InvoiceReader.ReadSpokenTextAsync(transcriptBox.Text, ct, await ShopItemNamesAsync()));
             }
             else if (_imagePath != null)
             {
@@ -150,8 +150,18 @@ namespace Inventory
                 var text = await InvoiceReader.TranscribeAsync(path, ct);
                 transcriptBox.Text = text;
                 ShowStatus("Turning what was said into purchase lines...", Color.FromArgb(29, 78, 160));
-                return await InvoiceReader.ReadSpokenTextAsync(text, ct);
+                return await InvoiceReader.ReadSpokenTextAsync(text, ct, await ShopItemNamesAsync());
             });
+        }
+
+        // The shop's item names, given to the AI with a voice note so it says which item each line is
+        // (said in Arabic, saved in English, or misspelled). Loaded once; without them the fuzzy match alone is used.
+        private List<string>? _shopItemNames;
+        private async Task<List<string>?> ShopItemNamesAsync()
+        {
+            if (_shopItemNames != null) return _shopItemNames;
+            try { return _shopItemNames = await _purchaseRepository.GetItemNamesAsync(); }
+            catch (Exception) { return null; }   // e.g. Database/purchase_functions.sql not applied yet
         }
 
         // Runs one AI reading: busy state, timing, the lines, clear errors
@@ -258,8 +268,15 @@ namespace Inventory
             {
                 var row = new RowData { Line = line };
                 var name = string.IsNullOrWhiteSpace(line.ItemName) ? line.Text : line.ItemName;
-                row.Candidates.AddRange(await _purchaseRepository.MatchPackagingAsync(name, line.Packaging, line.Barcode, textAlt: line.ItemNameAlt,
-                    packSize: line.PackSize));
+                // The shop item the AI recognised (voice note): its exact name scores highest; the fuzzy matches
+                // of the name said follow as other choices
+                if (!string.IsNullOrWhiteSpace(line.ShopItem))
+                    row.Candidates.AddRange(await _purchaseRepository.MatchPackagingAsync(line.ShopItem, line.Packaging, null, limit: 3,
+                        packSize: line.PackSize));
+                foreach (var c in await _purchaseRepository.MatchPackagingAsync(name, line.Packaging, line.Barcode, textAlt: line.ItemNameAlt,
+                             packSize: line.PackSize))
+                    if (row.Candidates.All(x => x.PackagingId != c.PackagingId)) row.Candidates.Add(c);
+                row.Candidates.Sort((a, b) => b.Score.CompareTo(a.Score));
                 if (row.Candidates.Count > 0 && row.Candidates[0].Score >= GoodMatch) row.Chosen = row.Candidates[0];
                 _rows.Add(row);
             }

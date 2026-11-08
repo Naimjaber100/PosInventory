@@ -19,6 +19,10 @@
     <None Update="appsettings.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <!-- Pictures of the banknotes of the payment screen (optional): Banknotes\LBP_100000.png, Banknotes\USD_20.jpg ... -->
+    <None Update="Banknotes\*.png;Banknotes\*.jpg;Banknotes\*.jpeg">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
     <!-- Secrets (OpenAI key); ignored by git, copied next to the program when it exists -->
     <None Update="appsettings.local.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

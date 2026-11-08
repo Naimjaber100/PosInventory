@@ -167,6 +167,19 @@ namespace Inventory.Repositories
             return await GetListAsync<SaleHistoryModel>(Procedures.SalesByUser, parameters);
         }
 
+        /// <summary>
+        /// Finished sales and returns found by invoice number on any day, newest first: a number alone finds the invoices
+        /// ending in it ("150" = S-2026-000150), else a part of the number. userId null = every cashier.
+        /// </summary>
+        public async Task<IEnumerable<SaleHistoryModel>> FindInvoiceAsync(string search, int? userId)
+        {
+            var parameters = new DynamicParameters();
+            parameters.Add("p_search", search, DbType.String);
+            parameters.Add("p_user_id", userId, DbType.Int32);
+
+            return await GetListAsync<SaleHistoryModel>(Procedures.SalesFindInvoice, parameters);
+        }
+
         /// <summary>The items of one sale or return.</summary>
         public async Task<IEnumerable<SaleHistoryLineModel>> GetSaleLinesAsync(int saleId)
         {

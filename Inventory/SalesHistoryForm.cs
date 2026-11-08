@@ -7,6 +7,7 @@ namespace Inventory
     // Top: total sales and total profit (returns subtracted), invoice count, returns. Click an invoice: its items below.
     // A User sees only their own invoices; a Manager can choose a cashier or All users.
     // The selected invoice: Print receipt / Receipt preview (80 mm), or Print A4 invoice (a normal printer).
+    // Invoice no. (Ctrl+F): finds an invoice by its number on any day ("150" = S-2026-000150 and R-2026-000150).
     public partial class SalesHistoryForm : Form
     {
         private const int AllUsers = 0;
@@ -16,6 +17,7 @@ namespace Inventory
         private List<SaleHistoryModel> _sales = new();
         private bool _loading = true;
         private Label _salesValue = null!, _profitValue = null!, _countValue = null!, _returnsValue = null!;
+        private readonly TextBox _invoiceSearch;
 
         private int? _openForUserId;        // set when opened from a report: the cashier (null = all users)
         private bool _openedFromReport;
@@ -50,6 +52,22 @@ namespace Inventory
                 filterPanel.Controls.Add(newButton);
                 filterPanel.Controls.SetChildIndex(newButton, 0);
             }
+
+            // Invoice no. (Ctrl+F): a row under the period; finds the invoice on any day, Enter / Find. Empty = the period again.
+            var searchPanel = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 48, WrapContents = false, Padding = new Padding(10, 2, 10, 4) };
+            _invoiceSearch = new TextBox { Width = 220, Margin = new Padding(3, 7, 3, 3), PlaceholderText = "e.g. 150 or S-2026-000150" };
+            _invoiceSearch.KeyDown += async (_, e) =>
+            {
+                if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; await LoadSalesAsync(); }
+            };
+            var findButton = new Button { Text = "Find", Size = new Size(90, refreshButton.Height), Margin = new Padding(3, 3, 3, 3) };
+            findButton.Click += async (_, _) => await LoadSalesAsync();
+            var clearSearchButton = new Button { Text = "Show the period", Size = new Size(150, refreshButton.Height), Margin = new Padding(3, 3, 3, 3) };
+            clearSearchButton.Click += async (_, _) => await ClearSearchAsync();
+            searchPanel.Controls.Add(new Label { Text = "Invoice no.", AutoSize = true, Margin = new Padding(3, 11, 3, 3) });
+            searchPanel.Controls.AddRange(new Control[] { _invoiceSearch, findButton, clearSearchButton });
+            Controls.Add(searchPanel);
+            Controls.SetChildIndex(searchPanel, Controls.GetChildIndex(filterPanel));   // docked right under the period row
 
             AppTheme.Apply(this);
             BuildCards();
@@ -137,14 +155,17 @@ namespace Inventory
         {
             if (_loading) return;
             if (toPicker.Value.Date < fromPicker.Value.Date) toPicker.Value = fromPicker.Value;
+            var search = _invoiceSearch.Text.Trim();
             try
             {
                 UseWaitCursor = true;
-                _sales = (await _saleRepository.GetSalesByUserAsync(SelectedUserId, fromPicker.Value, toPicker.Value)).ToList();
+                _sales = (search.Length > 0
+                    ? await _saleRepository.FindInvoiceAsync(search, SelectedUserId)
+                    : await _saleRepository.GetSalesByUserAsync(SelectedUserId, fromPicker.Value, toPicker.Value)).ToList();
                 invoicesGrid.DataSource = _sales;
                 ShowTotals();
                 if (_sales.Count > 0) await ShowLinesAsync(_sales[0]);
-                else ClearLines("No sales in this period.");
+                else ClearLines(search.Length > 0 ? $"No invoice found for \"{search}\"." : "No sales in this period.");
             }
             catch (Exception ex)
             {
@@ -166,7 +187,9 @@ namespace Inventory
             _countValue.Text = $"{sales.Count} sale(s)";
             _returnsValue.Text = returns.Count == 0 ? "none" : $"{returns.Count}  ·  {_currencies.FormatPrimary(returns.Sum(r => r.Total))}";
 
-            var period = fromPicker.Value.Date == toPicker.Value.Date
+            var search = _invoiceSearch.Text.Trim();
+            var period = search.Length > 0 ? $"Invoice no. \"{search}\" (any day): {_sales.Count} found"
+                : fromPicker.Value.Date == toPicker.Value.Date
                 ? fromPicker.Value.ToString("ddd dd/MM/yyyy")
                 : $"{fromPicker.Value:dd/MM/yyyy} - {toPicker.Value:dd/MM/yyyy}";
             var who = SelectedUserId == null ? "all users" : (userCombo.Visible ? userCombo.Text : AppSession.UserName);
@@ -215,6 +238,7 @@ namespace Inventory
 
         private async Task SetPeriodAsync(DateTime from, DateTime to)
         {
+            _invoiceSearch.Clear();   // choosing a period leaves the invoice search
             _loading = true;
             fromPicker.Value = from;
             toPicker.Value = to;
@@ -222,7 +246,35 @@ namespace Inventory
             await LoadSalesAsync();
         }
 
-        private async void period_ValueChanged(object? sender, EventArgs e) => await LoadSalesAsync();
+        private async void period_ValueChanged(object? sender, EventArgs e)
+        {
+            if (!_loading) _invoiceSearch.Clear();
+            await LoadSalesAsync();
+        }
+
+        private async Task ClearSearchAsync()
+        {
+            _invoiceSearch.Clear();
+            await LoadSalesAsync();
+            _invoiceSearch.Focus();
+        }
+
+        // Ctrl+F: the invoice number box; Esc in it (with a number typed) goes back to the period instead of closing
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if (keyData == (Keys.Control | Keys.F))
+            {
+                _invoiceSearch.Focus();
+                _invoiceSearch.SelectAll();
+                return true;
+            }
+            if (keyData == Keys.Escape && _invoiceSearch.Focused && _invoiceSearch.TextLength > 0)
+            {
+                _ = ClearSearchAsync();
+                return true;
+            }
+            return base.ProcessCmdKey(ref msg, keyData);
+        }
 
         private async void userCombo_SelectedIndexChanged(object? sender, EventArgs e) => await LoadSalesAsync();
 

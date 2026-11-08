@@ -560,7 +560,7 @@ namespace Inventory
             // stockColumn
             //
             stockColumn.DataPropertyName = "StockQty";
-            stockColumn.FillWeight = 70F;
+            stockColumn.FillWeight = 95F;
             stockColumn.HeaderText = "STOCK QTY";
             stockColumn.Name = "stockColumn";
             stockColumn.ReadOnly = true;

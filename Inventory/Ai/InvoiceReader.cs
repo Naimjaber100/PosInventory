@@ -32,6 +32,7 @@ namespace Inventory.Ai
         [JsonPropertyName("unit_price")] public decimal? UnitPrice { get; set; }
         [JsonPropertyName("line_total")] public decimal? LineTotal { get; set; }
         [JsonPropertyName("barcode")] public string? Barcode { get; set; }
+        [JsonPropertyName("shop_item")] public string? ShopItem { get; set; }                 // voice: the shop's item name it is (from the list given), or null
     }
 
     // The items read on a photo for new items: one product, or a list (a written / printed list, several labels...)
@@ -84,6 +85,7 @@ namespace Inventory.Ai
             - quantity: the number of packagings bought.
             - unit_price: price of ONE packaging; null if not written. line_total: the line amount; null if not written.
             - barcode: only if a barcode / EAN is printed on that line; else null.
+            - shop_item: null.
             Numbers: plain numbers without thousands separators (12500, not 12,500). If only line_total is written, still give it.
             Also give, when visible: supplier_name, invoice_number, invoice_date (YYYY-MM-DD), currency (ISO code: USD for $, LBP for L.L / ل.ل),
             discount (amount) and total. Use null for anything you cannot read; never guess numbers.
@@ -112,7 +114,7 @@ namespace Inventory.Ai
                   "items": {
                     "type": "object",
                     "additionalProperties": false,
-                    "required": ["text", "item_name", "item_name_alt", "packaging", "pack_size", "quantity", "unit_price", "line_total", "barcode"],
+                    "required": ["text", "item_name", "item_name_alt", "packaging", "pack_size", "quantity", "unit_price", "line_total", "barcode", "shop_item"],
                     "properties": {
                       "text":       { "type": "string" },
                       "item_name":  { "type": "string" },
@@ -122,7 +124,8 @@ namespace Inventory.Ai
                       "quantity":   { "type": "number" },
                       "unit_price": { "type": ["number", "null"] },
                       "line_total": { "type": ["number", "null"] },
-                      "barcode":    { "type": ["string", "null"] }
+                      "barcode":    { "type": ["string", "null"] },
+                      "shop_item":  { "type": ["string", "null"] }
                     }
                   }
                 }
@@ -154,6 +157,10 @@ namespace Inventory.Ai
             - quantity: the number of packagings; 1 when no number was said.
             - unit_price / line_total: only when a price was said ("at 9 dollars each" -> unit_price 9); else null.
             - barcode: null.
+            - shop_item: when the list of the shop's items is given, the name of the item this line is, copied EXACTLY as it
+              is written in that list (even when the list spells it wrongly, or in the other script: "صحة" -> "Sohat water",
+              "Aquafina" -> "aquafena", "بيبسي" -> "Pepsi can"). Think of the brand: a Lebanese brand said in Arabic is often saved
+              under its Latin name and the other way round. null when no item of the list is this one, or no list is given.
             supplier_name, invoice_number, invoice_date, currency (USD when dollars were said, LBP for lira / ليرة),
             discount and total: only when said; else null. Never guess numbers.
             """;
@@ -283,8 +290,13 @@ namespace Inventory.Ai
         }
 
         /// <summary>Turns the text of a voice note ("2 pepsi box, 1 unica pack...") into purchase lines.</summary>
-        public static Task<AiInvoice> ReadSpokenTextAsync(string text, CancellationToken cancel = default) =>
-            ExtractAsync<AiInvoice>(SpokenInstructions, "Voice note:\n" + text.Trim(), "this voice note", "purchase_invoice", Schema, cancel);
+        /// shopItems = the names of the shop's items: the AI then says which one each line is (shop_item), so an item
+        /// saved in the other script or misspelled ("صحه" said, "Sohat water" saved) is still found.
+        public static Task<AiInvoice> ReadSpokenTextAsync(string text, CancellationToken cancel = default, IReadOnlyCollection<string>? shopItems = null) =>
+            ExtractAsync<AiInvoice>(SpokenInstructions,
+                "Voice note:\n" + text.Trim()
+                + (shopItems is { Count: > 0 } ? "\n\nThe shop's items (one per line):\n" + string.Join("\n", shopItems) : string.Empty),
+                "this voice note", "purchase_invoice", Schema, cancel);
 
         // The cashier: the same reading, for what a customer buys ("1 pepsi can, 3 bread", "تلاتة خبز")
         private static readonly string CashierSpokenInstructions =

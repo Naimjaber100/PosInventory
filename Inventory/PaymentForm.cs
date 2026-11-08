@@ -7,9 +7,11 @@ namespace Inventory
     // Takes payment for a sale: cash in every active currency that has an exchange rate (Settings > Currencies),
     // and card in the primary currency. "Rest in ..." fills what is left in that currency. Shows the change live
     // (always given in the primary currency, in cash). Enter = pay, Esc = back to the sale.
+    // Under each cash box, its banknotes (BanknoteSettings): click one to add it to the box, right click to take it off.
     public partial class PaymentForm : Form
     {
         private const int RowHeight = 60;
+        private const int NotesHeight = 58;
 
         private readonly decimal _total;          // in the primary currency
         private readonly CurrencySet _currencies;
@@ -33,7 +35,8 @@ namespace Inventory
                 AddRow($"Cash {currency.Code}", PaymentMethod.Cash, currency, $"Rest in {currency.Code}");
             AddRow($"Card ({currencies.Primary.Code})", PaymentMethod.Card, currencies.Primary, "Rest by card");
 
-            ClientSize = new Size(ClientSize.Width, headerPanel.Height + _rows.Count * RowHeight + 12 + footerPanel.Height);
+            var rowsHeight = rowsTable.RowStyles.Cast<RowStyle>().Sum(r => (int)r.Height);
+            ClientSize = new Size(ClientSize.Width, headerPanel.Height + rowsHeight + 12 + footerPanel.Height);
             UpdatePaid();
         }
 
@@ -42,7 +45,7 @@ namespace Inventory
 
         private void AddRow(string caption, short method, CurrencyModel currency, string restText)
         {
-            var index = _rows.Count;
+            var index = rowsTable.RowCount;
             rowsTable.RowCount = index + 1;
             rowsTable.RowStyles.Add(new RowStyle(SizeType.Absolute, RowHeight));
 
@@ -53,7 +56,7 @@ namespace Inventory
                 Font = new Font("Segoe UI", 18F),
                 TextAlign = HorizontalAlignment.Right,
                 Margin = new Padding(3, 6, 3, 6),
-                TabIndex = index,
+                TabIndex = _rows.Count,
             };
             amount.TextChanged += (_, _) => UpdatePaid();
             var row = new PaymentRow(method, currency, amount);
@@ -64,6 +67,42 @@ namespace Inventory
             rowsTable.Controls.Add(amount, 1, index);
             rowsTable.Controls.Add(rest, 2, index);
             _rows.Add(row);
+
+            if (method == PaymentMethod.Cash) AddBanknotes(row);
+        }
+
+        // The banknotes of the currency under its cash box (Banknotes in appsettings.json):
+        // click = the note is added to the box, right click = taken off again
+        private void AddBanknotes(PaymentRow row)
+        {
+            var notes = BanknoteSettings.Current.For(row.Currency.Code);
+            if (notes.Count == 0) return;
+
+            var index = rowsTable.RowCount;
+            rowsTable.RowCount = index + 1;
+            rowsTable.RowStyles.Add(new RowStyle(SizeType.Absolute, NotesHeight));
+            var panel = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = new Padding(3, 0, 0, 4), Padding = Padding.Empty };
+            for (var i = 0; i < notes.Count; i++)
+            {
+                var note = new BanknoteButton(row.Currency.Code, notes[i], i);
+                note.MouseUp += (_, e) =>
+                {
+                    if (e.Button == MouseButtons.Left) AddNote(row, note.Value);
+                    else if (e.Button == MouseButtons.Right) AddNote(row, -note.Value);
+                };
+                panel.Controls.Add(note);
+            }
+            rowsTable.Controls.Add(panel, 1, index);
+            rowsTable.SetColumnSpan(panel, 2);
+        }
+
+        private void AddNote(PaymentRow row, decimal value)
+        {
+            var amount = Math.Max(0, Parse(row.Amount) + value);
+            var format = row.Currency.Decimals == 0 ? "0" : "0." + new string('0', row.Currency.Decimals);
+            row.Amount.Text = amount == 0 ? string.Empty : amount.ToString(format, CultureInfo.CurrentCulture);
+            row.Amount.Focus();
+            row.Amount.SelectionStart = row.Amount.TextLength;
         }
 
         private void PaymentForm_Shown(object? sender, EventArgs e)

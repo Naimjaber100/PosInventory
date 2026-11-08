@@ -63,6 +63,14 @@ namespace Inventory.Repositories
             return (await GetListAsync<PackagingLookupModel>(Procedures.MatchPurchasePackaging, parameters)).ToList();
         }
 
+        /// <summary>The names of the items that can be purchased (given to the AI reading a voice note).</summary>
+        public async Task<List<string>> GetItemNamesAsync(int limit = 3000)
+        {
+            var parameters = new DynamicParameters();
+            parameters.Add("p_limit", limit);
+            return (await GetListAsync<string>(Procedures.PurchaseItemNames, parameters)).ToList();
+        }
+
         /// <summary>
         /// Saves a new purchase or return (header.PurchaseId = 0) or updates a draft, with all its lines.
         /// post = true also posts it (purchase: stock up and average cost updated; return: stock and the supplier

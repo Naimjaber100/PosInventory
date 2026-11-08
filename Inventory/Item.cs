@@ -533,7 +533,8 @@ namespace Inventory
             detailStatusLabel.ForeColor = product.IsActive ? Green : Muted;
 
             var state = StockState(product);
-            stockValueLabel.Text = product.ProductType == 1 ? $"{product.StockQty:#,0.###} {product.BaseUnit}" : "— (bundle)";
+            stockValueLabel.Text = product.ProductType != 1 ? "— (bundle)"
+                : $"{product.StockQty:#,0.###} {product.BaseUnit}" + (product.StockQty > 0 && product.StockInBoxes() is { } inBoxes ? $"  =  {inBoxes}" : string.Empty);
             stockValueLabel.ForeColor = state switch { StockLevel.Out => Red, StockLevel.Low => Orange, _ => Dark };
             reorderValueLabel.Text = $"{product.ReorderLevel:#,0.###} {product.BaseUnit}";
             unitsGrid.DataSource = null;
@@ -791,7 +792,7 @@ namespace Inventory
                 // The quantity in a colored box (green / orange low / red out) and a small note under it
                 var state = StockState(p);
                 var color = p.ProductType != 1 ? Muted : state switch { StockLevel.Out => Red, StockLevel.Low => Orange, _ => Green };
-                var text = p.ProductType != 1 ? "—" : p.StockQty.ToString("#,0.###");
+                var text = p.ProductType != 1 ? "—" : $"{p.StockQty:#,0.###} {p.BaseUnit}";
                 using var font = new Font("Segoe UI", 10F, FontStyle.Bold);
                 var size = TextRenderer.MeasureText(text, font);
                 var box = new Rectangle(r.X + 6, r.Y + 7, Math.Max(36, size.Width + 12), 24);
@@ -799,11 +800,15 @@ namespace Inventory
                 using (var back = new SolidBrush(p.ProductType != 1 ? Color.FromArgb(238, 241, 244) : color))
                     g.FillPath(back, path);
                 TextRenderer.DrawText(g, text, font, box, p.ProductType != 1 ? Muted : Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
-                if (state != StockLevel.Ok)
+                // Under it: the same stock in boxes ("7 box + 2 pcs"), and Low / Out of stock
+                var boxes = p.StockQty > 0 ? p.StockInBoxes() : null;
+                var note = string.Join("  ·  ", new[] { boxes, state == StockLevel.Out ? "Out of stock" : state == StockLevel.Low ? "Low stock" : null }
+                    .Where(s => s != null));
+                if (note.Length > 0)
                 {
                     using var small = new Font("Segoe UI Semibold", 7.5F, FontStyle.Bold);
-                    TextRenderer.DrawText(g, state == StockLevel.Out ? "Out of stock" : "Low stock", small,
-                        new Rectangle(r.X + 6, box.Bottom + 1, r.Width - 8, 16), color, TextFormatFlags.Left);
+                    TextRenderer.DrawText(g, note, small, new Rectangle(r.X + 6, box.Bottom + 1, r.Width - 8, 16),
+                        state == StockLevel.Ok ? Muted : color, TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
                 }
             }
             else

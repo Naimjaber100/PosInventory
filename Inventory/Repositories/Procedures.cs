@@ -79,6 +79,7 @@ namespace Inventory.Repositories
         public const string GetPurchaseById = "fn_purchase_get_by_id";
         public const string FindPurchasePackaging = "fn_purchase_find_packaging";
         public const string SavePurchase = "fn_purchase_save";        public const string MatchPurchasePackaging = "fn_purchase_match_packaging";
+        public const string PurchaseItemNames = "fn_purchase_item_names";   // AI voice note: which shop item each line is
 
         // Cashier / sales (Database/pos_functions.sql; fn_save_sale, fn_hold_sale, fn_current_rate were already in the database)
         public const string PosFindItem = "fn_pos_find_item";
@@ -88,6 +89,7 @@ namespace Inventory.Repositories
         public const string PosDeleteHeld = "fn_pos_delete_held";
         public const string SaveReturn = "fn_save_return";
         public const string SalesByUser = "fn_sales_by_user";
+        public const string SalesFindInvoice = "fn_sales_find_invoice";
         public const string SaleGetLines = "fn_sale_get_lines";
         public const string SaleReceipt = "fn_sale_receipt";   // Database/receipt_functions.sql
         public const string AddAudit = "fn_audit_add";

@@ -23,5 +23,20 @@ namespace Inventory.Models
         public decimal? VatRate { get; set; }   // TVA %; null when adding = the company's rate
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
+
+        // The biggest packaging (fn_product_get_all only): "box" of 6 -> the stock is also shown as boxes
+        public string? BoxUnit { get; set; }
+        public decimal? BoxFactor { get; set; }
+
+        /// <summary>The stock in boxes and the pieces left over: 44 pcs, box of 6 -> "7 box + 2 pcs"; null without a box.</summary>
+        public string? StockInBoxes()
+        {
+            if (ProductType != 1 || BoxFactor is not > 1 || string.IsNullOrWhiteSpace(BoxUnit)) return null;
+            var factor = BoxFactor.Value;
+            var boxes = decimal.Truncate(StockQty / factor);
+            var rest = StockQty - boxes * factor;
+            var text = $"{boxes:#,0} {BoxUnit}";
+            return rest == 0 ? text : $"{text} + {rest:#,0.###} {BaseUnit}";
+        }
     }
 }

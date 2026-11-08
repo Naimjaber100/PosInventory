@@ -83,6 +83,40 @@ AS $$
     ORDER BY si.invoice_date DESC, si.sale_id DESC;
 $$;
 
+-- Finished sales and returns found by their invoice number, on any day (Sales F7 > Invoice no.), newest first.
+-- Only a number ("150"): every invoice whose number ends in it (S-2026-000150, R-2025-000150...);
+-- else a part of the number ("S-2026-00015", "r-2026"). p_user_id NULL = every cashier.
+CREATE OR REPLACE FUNCTION public.fn_sales_find_invoice(p_search text, p_user_id integer DEFAULT NULL, p_limit integer DEFAULT 200)
+RETURNS TABLE (sale_id integer, invoice_no varchar, invoice_type smallint, invoice_date timestamptz, cashier varchar,
+               item_count bigint, total numeric, profit numeric, payments text,
+               customer varchar, on_account_lbp numeric, due_lbp numeric)
+LANGUAGE sql STABLE
+AS $$
+    WITH s AS (SELECT upper(trim(p_search)) AS text, trim(p_search) ~ '^[0-9]+$' AS is_number)
+    SELECT si.sale_id, si.invoice_no, si.invoice_type, si.invoice_date, u.full_name,
+           (SELECT count(*) FROM sales_lines l WHERE l.sale_id = si.sale_id),
+           si.total, si.profit,
+           (SELECT string_agg(trim(p.currency) || ' ' || to_char(p.amount, 'FM999,999,999,990.##')
+                              || CASE p.method WHEN 2 THEN ' card' WHEN 3 THEN ' account' ELSE '' END, ' + ' ORDER BY p.payment_id)
+            FROM sales_payments p WHERE p.sale_id = si.sale_id),
+           CASE WHEN cu.customer_id <> 1 THEN cu.name END,   -- 1 = walk-in customer
+           coalesce((SELECT sum(p.amount_lbp) FROM sales_payments p WHERE p.sale_id = si.sale_id AND p.method = 3), 0),
+           si.due_lbp
+    FROM sales_invoices si
+    CROSS JOIN s
+    LEFT JOIN users u ON u.user_id = si.user_id
+    LEFT JOIN customers cu ON cu.customer_id = si.customer_id
+    WHERE si.status = 1
+      AND s.text <> ''
+      AND (p_user_id IS NULL OR si.user_id = p_user_id)
+      AND CASE WHEN s.is_number
+               THEN si.invoice_no ~ ('(^|[^0-9])0*' || ltrim(s.text, '0') || '$') OR si.invoice_no = s.text
+               ELSE upper(si.invoice_no) LIKE '%' || replace(replace(replace(s.text, '\', '\\'), '%', '\%'), '_', '\_') || '%'
+          END
+    ORDER BY si.invoice_date DESC, si.sale_id DESC
+    LIMIT greatest(coalesce(p_limit, 200), 1);
+$$;
+
 -- The items of one sale or return
 CREATE OR REPLACE FUNCTION public.fn_sale_get_lines(p_sale_id integer)
 RETURNS TABLE (line_no integer, item_name varchar, quantity numeric, unit_price numeric, discount numeric,
