@@ -14,6 +14,7 @@ C:\Projects\Inventory\Inventory\bin\Release\net10.0-windows\publish\Database\rec
 C:\Projects\Inventory\Inventory\bin\Release\net10.0-windows\publish\Database\report_functions.sql
 C:\Projects\Inventory\Inventory\bin\Release\net10.0-windows\publish\Database\scale_functions.sql
 C:\Projects\Inventory\Inventory\bin\Release\net10.0-windows\publish\Database\shift_functions.sql
+C:\Projects\Inventory\Inventory\bin\Release\net10.0-windows\publish\Database\stock_adjustment_functions.sql
 C:\Projects\Inventory\Inventory\bin\Release\net10.0-windows\publish\Database\user_functions.sql
 C:\Projects\Inventory\Inventory\bin\Release\net10.0-windows\publish\Database\user_tracking.sql
 C:\Projects\Inventory\Inventory\bin\Release\net10.0-windows\publish\Deploy\app_user.sql

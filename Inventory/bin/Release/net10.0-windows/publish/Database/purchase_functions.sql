@@ -850,3 +850,19 @@ AS $$
     ORDER BY c.score DESC, c.item_name, c.factor
     LIMIT greatest(coalesce(p_limit, 5), 1);
 $$;
+
+-- ---------------------------------------------------------------------------
+-- AI voice notes: the names of the items that can be purchased, given to the AI so it can tell which shop item each
+-- spoken line is ("صحه" -> "Sohat water", "Aquafina" -> "aqaufina"), whatever script or spelling the item was saved in.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.fn_purchase_item_names(p_limit integer DEFAULT 3000)
+RETURNS TABLE (item_name text)
+LANGUAGE sql STABLE
+AS $$
+    SELECT DISTINCT p.name::text
+    FROM products p
+    WHERE p.is_active AND p.product_type = 1
+      AND EXISTS (SELECT 1 FROM product_packaging pk WHERE pk.product_id = p.product_id AND pk.is_active AND pk.can_purchase)
+    ORDER BY 1
+    LIMIT greatest(coalesce(p_limit, 3000), 1);
+$$;

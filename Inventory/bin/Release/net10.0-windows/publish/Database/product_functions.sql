@@ -219,6 +219,7 @@ RETURNS TABLE (
     product_type smallint, size varchar, color varchar, base_unit varchar, is_weighted boolean,
     avg_cost numeric, stock_qty numeric, reorder_level numeric, sale_price numeric, barcode varchar,
     is_active boolean, created_at timestamptz, updated_at timestamptz, vat_rate numeric,
+    box_unit varchar, box_factor numeric,   -- the biggest active packaging (Box of 6...): the stock is also shown in it
     total_count bigint)
 LANGUAGE plpgsql STABLE
 AS $$
@@ -242,10 +243,15 @@ BEGIN
            p.product_type, p.size, p.color, p.base_unit, p.is_weighted,
            p.avg_cost, p.stock_qty, p.reorder_level, pk.sale_price, pk.barcode,
            p.is_active, p.created_at, p.updated_at, p.vat_rate,
+           bx.name, bx.factor,
            count(*) OVER ()
     FROM products p
     LEFT JOIN categories c         ON c.category_id = p.category_id
     LEFT JOIN product_packaging pk ON pk.product_id = p.product_id AND pk.is_default
+    LEFT JOIN LATERAL (SELECT b.name, b.factor FROM product_packaging b
+                       WHERE b.product_id = p.product_id AND b.is_active AND b.factor > 1
+                       ORDER BY b.factor DESC, b.is_default DESC, b.packaging_id
+                       LIMIT 1) bx ON true
     WHERE (p_category_id IS NULL
            OR (p_category_id = 0 AND p.category_id IS NULL)
            OR p.category_id IN (
@@ -537,6 +543,42 @@ BEGIN
         INSERT INTO product_packaging (product_id, name, factor, barcode, sale_price, is_default)
         VALUES (p_product_id, trim(p_base_unit), 1, nullif(trim(p_barcode), ''), coalesce(p_sale_price, 0), true);
     END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- Products: adjust stock (Edit item > "Adjust stock to")
+-- Sets the stock of one standard item to p_new_qty through a one-line stock
+-- adjustment, posted at once by fn_post_stock_adjustment (stock movement type 5).
+-- Returns the adjustment number, or NULL when the stock is already p_new_qty.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.fn_product_adjust_stock(
+    p_product_id integer,
+    p_new_qty    numeric,
+    p_reason     text,
+    p_user_id    integer)
+RETURNS text
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_type  smallint;
+    v_stock numeric;
+    v_id    integer;
+BEGIN
+    IF p_new_qty IS NULL OR p_new_qty < 0 THEN RAISE EXCEPTION 'The new stock quantity cannot be negative.'; END IF;
+
+    SELECT product_type, stock_qty INTO v_type, v_stock FROM products WHERE product_id = p_product_id FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Item % not found.', p_product_id; END IF;
+    IF v_type <> 1 THEN RAISE EXCEPTION 'Only standard items hold stock.'; END IF;
+    IF v_stock = p_new_qty THEN RETURN NULL; END IF;
+
+    INSERT INTO stock_adjustments (reason, user_id)
+    VALUES (coalesce(nullif(trim(p_reason), ''), 'Manual adjustment'), p_user_id)
+    RETURNING adjustment_id INTO v_id;
+
+    INSERT INTO stock_adjustment_lines (adjustment_id, product_id, counted_qty, qty_before)
+    VALUES (v_id, p_product_id, p_new_qty, v_stock);
+
+    RETURN fn_post_stock_adjustment(v_id, p_user_id);
 END $$;
 
 -- ---------------------------------------------------------------------------
