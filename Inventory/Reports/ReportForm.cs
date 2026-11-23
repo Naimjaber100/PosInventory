@@ -182,24 +182,72 @@ namespace Inventory.Reports
                 var panel = new Panel { Width = 238, Height = 92, Margin = new Padding(0, 0, 10, 0), BackColor = Color.White, Tag = "card" };
                 var color = card.Color;
                 panel.Paint += (_, e) => { using var bar = new SolidBrush(color); e.Graphics.FillRectangle(bar, 0, 0, 5, panel.Height); };
-                panel.Controls.Add(new Label { Text = card.Caption, Location = new Point(16, 8), AutoSize = true, ForeColor = Color.DimGray, Font = new Font("Segoe UI Semibold", 8.5F, FontStyle.Bold) });
-                panel.Controls.Add(new Label { Text = card.Value, Location = new Point(13, 28), Size = new Size(222, 36), ForeColor = card.Color, Font = new Font("Segoe UI", 14.5F, FontStyle.Bold), AutoEllipsis = true, Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right });
+                panel.Controls.Add(new Label { Text = card.Caption, Tag = "caption", AutoSize = false, AutoEllipsis = true, ForeColor = Color.DimGray, Font = new Font("Segoe UI Semibold", 8.5F, FontStyle.Bold) });
+                panel.Controls.Add(new Label { Text = card.Value, Tag = "value", AutoSize = false, AutoEllipsis = true, ForeColor = card.Color, Font = new Font("Segoe UI", 14.5F, FontStyle.Bold), TextAlign = ContentAlignment.MiddleLeft });
                 if (card.Note != null)
-                    panel.Controls.Add(new Label { Text = card.Note, Location = new Point(16, 66), Size = new Size(218, 20), ForeColor = Color.DimGray, Font = new Font("Segoe UI", 8.5F), AutoEllipsis = true, Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right });
+                    panel.Controls.Add(new Label { Text = card.Note, Tag = "note", AutoSize = false, AutoEllipsis = true, ForeColor = Color.DimGray, Font = new Font("Segoe UI", 8.5F) });
                 cardsPanel.Controls.Add(panel);
             }
             FitCards();
             cardsPanel.ResumeLayout();
         }
 
-        // Cards share the width of the window (238 px at most), so 5, 6 or more cards always fit
+        // Cards share the width of the window and take the height of their panel, so they fit any screen (small POS
+        // screens and other display scaling included). The amount shrinks its font until it shows whole.
         private void FitCards()
         {
             var cards = cardsPanel.Controls.Cast<Control>().Where(c => Equals(c.Tag, "card")).ToList();
             if (cards.Count == 0) return;
-            var room = cardsPanel.ClientSize.Width - cardsPanel.Padding.Horizontal - cards.Count * 10;
-            var width = Math.Clamp(room / cards.Count, 150, 238);
-            foreach (var card in cards) card.Width = width;
+            var scale = DeviceDpi / 96f;
+            var gap = cards[0].Margin.Right;
+            var room = cardsPanel.ClientSize.Width - cardsPanel.Padding.Horizontal - cards.Count * gap;
+            var width = Math.Clamp(room / cards.Count, (int)(100 * scale), (int)(238 * scale));
+            var height = Math.Max(cardsPanel.ClientSize.Height - cardsPanel.Padding.Vertical, (int)(60 * scale));
+            var left = (int)(12 * scale);
+            var inner = width - left - (int)(4 * scale);
+
+            foreach (var card in cards)
+            {
+                card.Size = new Size(width, height);
+                var labels = card.Controls.OfType<Label>().ToDictionary(l => (string)l.Tag!);
+                var top = (int)(4 * scale);
+                var bottom = height - (int)(3 * scale);
+                if (labels.TryGetValue("caption", out var caption))
+                {
+                    var h = TextRenderer.MeasureText("Ag", caption.Font).Height;
+                    caption.SetBounds(left, top, inner, h);
+                    top += h;
+                }
+                if (labels.TryGetValue("note", out var note))
+                {
+                    var h = TextRenderer.MeasureText("Ag", note.Font).Height;
+                    note.SetBounds(left, bottom - h, inner, h);
+                    bottom -= h;
+                }
+                if (labels.TryGetValue("value", out var value))
+                {
+                    value.SetBounds(left - 3, top, inner + 3, Math.Max(bottom - top, 1));
+                    FitFont(value, 14.5F, 7.5F);
+                }
+            }
+        }
+
+        // The largest font size (from max down to min) at which the label's text shows whole
+        private static void FitFont(Label label, float max, float min)
+        {
+            for (var size = max; ; size -= 0.5F)
+            {
+                var font = new Font(label.Font.FontFamily, size, label.Font.Style);
+                var needed = TextRenderer.MeasureText(label.Text, font, Size.Empty, TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
+                if (size <= min || (needed.Width <= label.Width - 4 && needed.Height <= label.Height))
+                {
+                    var old = label.Font;
+                    label.Font = font;
+                    old.Dispose();
+                    return;
+                }
+                font.Dispose();
+            }
         }
 
         private void cardsPanel_Resize(object? sender, EventArgs e) => FitCards();
@@ -253,7 +301,32 @@ namespace Inventory.Reports
         private void grid_DataBindingComplete(object? sender, DataGridViewBindingCompleteEventArgs e)
         {
             _report.FormatGrid(grid);
+            KeepValuesWhole();
             grid.ClearSelection();   // no row highlighted until one is clicked
+        }
+
+        // Columns still fill the window, but never get narrower than their values: amounts and quantities always show
+        // whole; text (item names...) may shorten to a reasonable minimum. When the screen is too small for all of
+        // them, the grid scrolls sideways instead of cutting the numbers ("1,995,0...").
+        private void KeepValuesWhole()
+        {
+            var scale = DeviceDpi / 96f;
+            // Measure the first rows and every total row (the largest amounts); enough for long reports
+            var rows = grid.Rows.Cast<DataGridViewRow>()
+                .Where(r => r.Index < 300 || (r.DataBoundItem is { } item && _report.IsTotalRow(item)))
+                .ToList();
+            foreach (DataGridViewColumn column in grid.Columns)
+            {
+                if (!column.Visible) continue;
+                var type = column.ValueType is { } t ? Nullable.GetUnderlyingType(t) ?? t : typeof(string);
+                var isText = type == typeof(string);
+                var needed = 0;
+                foreach (var row in rows)
+                    needed = Math.Max(needed, row.Cells[column.Index].PreferredSize.Width);
+                needed += (int)(6 * scale);
+                var cap = (int)((isText ? 130 : 400) * scale);
+                column.MinimumWidth = Math.Clamp(needed, (int)(40 * scale), cap);
+            }
         }
 
         private void grid_CellFormatting(object? sender, DataGridViewCellFormattingEventArgs e)

@@ -87,13 +87,33 @@ namespace Inventory
                 TextRenderer.DrawText(g, Glyph, iconFont, new Rectangle(left, 16, 40, 40), Color.White,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
 
+            // Each text takes the largest font (down to a minimum) at which it shows whole, so the amounts are never
+            // cut on a small screen ("15,715,950 ..."); the lines stack under the icon, whatever the card's height.
             const TextFormatFlags flags = TextFormatFlags.Left | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding;
-            using var captionFont = new Font("Segoe UI", 10.5F);
-            using var valueFont = new Font("Segoe UI Semibold", Width < 250 ? 16F : 20F, FontStyle.Bold);
-            using var noteFont = new Font("Segoe UI", 9.5F);
-            TextRenderer.DrawText(g, Caption, captionFont, new Rectangle(left, 64, width, 22), Color.DimGray, flags);
-            TextRenderer.DrawText(g, _value, valueFont, new Rectangle(left, 86, width, 40), Ink, flags | TextFormatFlags.VerticalCenter);
-            TextRenderer.DrawText(g, _note, noteFont, new Rectangle(left, 128, width, 20), _noteColor, flags);
+            using var captionFont = Fit(g, Caption, "Segoe UI", FontStyle.Regular, 10.5F, 8.5F, width);
+            using var valueFont = Fit(g, _value, "Segoe UI Semibold", FontStyle.Bold, Width < 250 ? 16F : 20F, 9F, width);
+            using var noteFont = Fit(g, _note, "Segoe UI", FontStyle.Regular, 9.5F, 7.5F, width);
+            var captionHeight = TextRenderer.MeasureText(g, "Ag", captionFont, Size.Empty, TextFormatFlags.NoPadding).Height + 2;
+            var valueHeight = TextRenderer.MeasureText(g, "Ag", valueFont, Size.Empty, TextFormatFlags.NoPadding).Height + 4;
+            var noteHeight = TextRenderer.MeasureText(g, "Ag", noteFont, Size.Empty, TextFormatFlags.NoPadding).Height + 2;
+            var y = Math.Min(64, Math.Max(58, Height - Padding.Bottom / 2 - captionHeight - valueHeight - noteHeight));
+            TextRenderer.DrawText(g, Caption, captionFont, new Rectangle(left, y, width, captionHeight), Color.DimGray, flags);
+            y += captionHeight;
+            TextRenderer.DrawText(g, _value, valueFont, new Rectangle(left, y, width, valueHeight), Ink, flags | TextFormatFlags.VerticalCenter);
+            y += valueHeight;
+            TextRenderer.DrawText(g, _note, noteFont, new Rectangle(left, y, width, noteHeight), _noteColor, flags);
+        }
+
+        // The font from max down to min (half a point at a time) at which the text fits the width on one line
+        private static Font Fit(Graphics g, string text, string family, FontStyle style, float max, float min, int width)
+        {
+            for (var size = max; ; size -= 0.5F)
+            {
+                var font = new Font(family, size, style);
+                if (size <= min || TextRenderer.MeasureText(g, text, font, Size.Empty, TextFormatFlags.NoPadding | TextFormatFlags.SingleLine).Width <= width)
+                    return font;
+                font.Dispose();
+            }
         }
     }
 

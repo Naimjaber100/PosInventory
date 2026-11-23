@@ -608,12 +608,38 @@ namespace Inventory
                 }
             };
             grid.CellPainting += recentGrid_CellPainting;
-            grid.DataBindingComplete += (_, _) => grid.ClearSelection();
+            grid.DataBindingComplete += (_, _) =>
+            {
+                KeepRecentValuesWhole(grid);
+                grid.ClearSelection();
+            };
             grid.CellDoubleClick += (_, e) =>
             {
                 if (e.RowIndex >= 0 && e.RowIndex < _recent.Count) ShowSales(_recent[e.RowIndex].InvoiceDate, _recent[e.RowIndex].InvoiceDate);
             };
             return grid;
+        }
+
+        // On a small screen the columns still share the width, but invoice number, date, amount and status never get
+        // narrower than their values (the customer name shortens instead); if they cannot all fit, the list scrolls sideways
+        private void KeepRecentValuesWhole(DataGridView grid)
+        {
+            var scale = DeviceDpi / 96f;
+            foreach (DataGridViewColumn column in grid.Columns)
+            {
+                int needed;
+                if (column.Name == "Status")
+                {
+                    using var font = new Font("Segoe UI Semibold", 9F, FontStyle.Bold);
+                    needed = _recent.Select(s => TextRenderer.MeasureText(StatusOf(s).Text, font).Width + 22).DefaultIfEmpty(60).Max() + (int)(10 * scale);
+                }
+                else
+                {
+                    needed = grid.Rows.Cast<DataGridViewRow>().Select(r => r.Cells[column.Index].PreferredSize.Width).DefaultIfEmpty(0).Max() + (int)(6 * scale);
+                }
+                var isCustomer = column.DataPropertyName == nameof(SaleHistoryModel.Customer);
+                column.MinimumWidth = Math.Clamp(needed, (int)(40 * scale), (int)((isCustomer ? 90 : 300) * scale));
+            }
         }
 
         // Paid / Unpaid / Partly paid / Return of an invoice of the list, with its color
